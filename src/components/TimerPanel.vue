@@ -7,29 +7,81 @@ import AnimatedClock from "./AnimatedClock.vue";
 
 const WORK_KEY = "eye-guard.workMin";
 const BREAK_KEY = "eye-guard.breakMin";
+const LONG_BREAK_KEY = "eye-guard.longBreakMin";
+const CYCLES_KEY = "eye-guard.cyclesPerLongBreak";
+const STATS_KEY = "eye-guard.todayStats";
 
 const phase = ref<PhaseStatus["phase"]>("idle");
 const remaining = ref(0);
 const cycle = ref(0);
+const longBreak = ref(false);
 const workMin = ref(25);
 const breakMin = ref(5);
+const longBreakMin = ref(15);
+const cyclesPerLongBreak = ref(4);
 const error = ref("");
 
 const running = computed(() => phase.value !== "idle");
 
 let unlisteners: UnlistenFn[] = [];
 
+interface TodayStats {
+  date: string;
+  count: number;
+}
+
+const todayStats = ref<TodayStats>({ date: "", count: 0 });
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function loadTodayStats() {
+  try {
+    const raw = localStorage.getItem(STATS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as TodayStats;
+      if (typeof parsed.date === "string" && typeof parsed.count === "number") {
+        todayStats.value = { date: parsed.date, count: parsed.count };
+      }
+    }
+  } catch {
+    // 数据损坏时按今日 0 轮处理
+  }
+  if (todayStats.value.date !== todayStr()) {
+    todayStats.value = { date: todayStr(), count: 0 };
+  }
+}
+
+// 休息结束回到工作 = 完成一个番茄钟；跨日自动清零
+function recordCompletedCycle() {
+  const date = todayStr();
+  const count = todayStats.value.date === date ? todayStats.value.count + 1 : 1;
+  todayStats.value = { date, count };
+  localStorage.setItem(STATS_KEY, JSON.stringify(todayStats.value));
+}
+
 function apply(s: PhaseStatus) {
+  if (phase.value === "break" && s.phase === "work" && s.cycle > 0) {
+    recordCompletedCycle();
+  }
   phase.value = s.phase;
   remaining.value = s.remaining_secs;
   cycle.value = s.cycle;
+  longBreak.value = s.long_break;
 }
 
 onMounted(async () => {
   const savedWork = Number(localStorage.getItem(WORK_KEY));
   const savedBreak = Number(localStorage.getItem(BREAK_KEY));
+  const savedLongBreak = Number(localStorage.getItem(LONG_BREAK_KEY));
+  const savedCycles = Number(localStorage.getItem(CYCLES_KEY));
   if (Number.isFinite(savedWork) && savedWork >= 1) workMin.value = Math.floor(savedWork);
   if (Number.isFinite(savedBreak) && savedBreak >= 1) breakMin.value = Math.floor(savedBreak);
+  if (Number.isFinite(savedLongBreak) && savedLongBreak >= 1) longBreakMin.value = Math.floor(savedLongBreak);
+  if (Number.isFinite(savedCycles) && savedCycles >= 1) cyclesPerLongBreak.value = Math.floor(savedCycles);
+  loadTodayStats();
 
   unlisteners.push(
     await listen<PhaseStatus>("timer-tick", (e) => apply(e.payload)),
@@ -49,6 +101,8 @@ onUnmounted(() => {
 
 watch(workMin, (v) => localStorage.setItem(WORK_KEY, String(v)));
 watch(breakMin, (v) => localStorage.setItem(BREAK_KEY, String(v)));
+watch(longBreakMin, (v) => localStorage.setItem(LONG_BREAK_KEY, String(v)));
+watch(cyclesPerLongBreak, (v) => localStorage.setItem(CYCLES_KEY, String(v)));
 
 async function start() {
   error.value = "";
@@ -56,14 +110,21 @@ async function start() {
     error.value = "工作与休息时长必须 ≥ 1 分钟";
     return;
   }
+  if (!(cyclesPerLongBreak.value >= 1) || !(longBreakMin.value >= 1)) {
+    error.value = "长休息周期与时长必须 ≥ 1";
+    return;
+  }
   try {
     await invoke("start_pomodoro", {
       workSecs: Math.floor(workMin.value) * 60,
       breakSecs: Math.floor(breakMin.value) * 60,
+      longBreakSecs: Math.floor(longBreakMin.value) * 60,
+      cyclesPerLongBreak: Math.floor(cyclesPerLongBreak.value),
     });
     phase.value = "work";
     remaining.value = Math.floor(workMin.value) * 60;
     cycle.value = 1;
+    longBreak.value = false;
   } catch (e) {
     error.value = String(e);
   }
@@ -76,6 +137,7 @@ async function stop() {
     phase.value = "idle";
     remaining.value = 0;
     cycle.value = 0;
+    longBreak.value = false;
   } catch (e) {
     error.value = String(e);
   }
@@ -101,9 +163,10 @@ async function startNow() {
     </div>
     <p class="meta">
       <span v-if="phase === 'work'">工作</span>
-      <span v-else-if="phase === 'break'">休息</span>
+      <span v-else-if="phase === 'break'">{{ longBreak ? "长休息" : "休息" }}</span>
       <span v-else>已停止</span>
       <span v-if="running"> · 第 {{ cycle }} 轮</span>
+      <span v-if="todayStats.count > 0"> · 今日 {{ todayStats.count }} 轮</span>
     </p>
     <div class="row">
       <label>
@@ -111,6 +174,14 @@ async function startNow() {
       </label>
       <label>
         休息 <input v-model.number="breakMin" type="number" min="1" :disabled="running" /> 分钟
+      </label>
+    </div>
+    <div class="row">
+      <label>
+        每 <input v-model.number="cyclesPerLongBreak" type="number" min="1" :disabled="running" /> 轮
+      </label>
+      <label>
+        长休息 <input v-model.number="longBreakMin" type="number" min="1" :disabled="running" /> 分钟
       </label>
     </div>
     <div class="row">

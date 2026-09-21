@@ -3,6 +3,8 @@ export interface PhaseStatus {
   phase: "idle" | "work" | "break";
   remaining_secs: number;
   cycle: number;
+  /** phase === "break" 时：本次是否为长休息 */
+  long_break: boolean;
 }
 
 export function formatClock(secs: number): string {

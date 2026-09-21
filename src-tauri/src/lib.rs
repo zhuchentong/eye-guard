@@ -17,14 +17,25 @@ struct PhaseStatus {
     phase: String,
     remaining_secs: u64,
     cycle: u64,
+    /// phase == "break" 时：本次是否为长休息
+    long_break: bool,
+}
+
+/// 计时配置，start_pomodoro 时写入
+#[derive(Clone, Copy)]
+struct TimerConfig {
+    work_secs: u64,
+    break_secs: u64,
+    long_break_secs: u64,
+    /// 每 N 轮工作后进入一次长休息
+    cycles_per_long_break: u64,
 }
 
 struct TimerState {
     running: Arc<AtomicBool>,
     handle: Mutex<Option<JoinHandle<()>>>,
     status: Mutex<PhaseStatus>,
-    /// (work_secs, break_secs)，start_pomodoro 时写入
-    config: Mutex<(u64, u64)>,
+    config: Mutex<TimerConfig>,
 }
 
 impl Default for TimerState {
@@ -37,8 +48,14 @@ impl Default for TimerState {
                 phase: "idle".to_string(),
                 remaining_secs: 0,
                 cycle: 0,
+                long_break: false,
             }),
-            config: Mutex::new((1500, 300)),
+            config: Mutex::new(TimerConfig {
+                work_secs: 1500,
+                break_secs: 300,
+                long_break_secs: 900,
+                cycles_per_long_break: 4,
+            }),
         }
     }
 }
@@ -74,7 +91,8 @@ fn finish_break<R: tauri::Runtime>(state: &TimerState, app: &AppHandle<R>) {
     close_lock_overlays(app);
     status.cycle += 1;
     status.phase = "work".to_string();
-    status.remaining_secs = state.config.lock().0;
+    status.remaining_secs = state.config.lock().work_secs;
+    status.long_break = false;
     let _ = app.emit("phase-changed", status.clone());
 }
 
@@ -95,8 +113,7 @@ fn pace_tick(next_tick: &mut Instant) {
 fn run_cycles<R: tauri::Runtime>(
     app: AppHandle<R>,
     running: Arc<AtomicBool>,
-    work_secs: u64,
-    break_secs: u64,
+    config: TimerConfig,
     initial_phase: &str,
 ) {
     let Some(state) = app.try_state::<TimerState>() else {
@@ -106,11 +123,12 @@ fn run_cycles<R: tauri::Runtime>(
         let mut status = state.status.lock();
         status.phase = initial_phase.to_string();
         status.remaining_secs = if initial_phase == "break" {
-            break_secs
+            config.break_secs
         } else {
-            work_secs
+            config.work_secs
         };
         status.running = true;
+        status.long_break = false;
     }
 
     let mut last_phase = String::new();
@@ -135,11 +153,19 @@ fn run_cycles<R: tauri::Runtime>(
                 let mut status = state.status.lock();
                 // 期间 status 可能被并发改写（如 start_break_now），仅在仍是 work/0 时转换
                 if status.phase == "work" && status.remaining_secs == 0 {
+                    // 每 N 轮工作进入一次长休息（cycle 即当前轮次）
+                    let is_long = config.cycles_per_long_break > 0
+                        && status.cycle % config.cycles_per_long_break == 0;
                     status.phase = "break".to_string();
-                    status.remaining_secs = break_secs;
+                    status.long_break = is_long;
+                    status.remaining_secs = if is_long {
+                        config.long_break_secs
+                    } else {
+                        config.break_secs
+                    };
                     let _ = app.emit("phase-changed", status.clone());
                 }
-            } else if (phase_started && work_secs <= 30) || remaining == 30 {
+            } else if (phase_started && config.work_secs <= 30) || remaining == 30 {
                 send_break_notice(&app);
             }
         } else if phase == "break" && remaining == 0 {
@@ -303,19 +329,20 @@ fn trigger_break_now<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<(), String
         return Ok(()); // 幂等
     }
     let was_running = state.running.load(Ordering::Relaxed);
-    let (work_secs, break_secs) = *state.config.lock();
+    let config = *state.config.lock();
     {
         let mut status = state.status.lock();
         status.running = true;
         status.phase = "break".to_string();
-        status.remaining_secs = break_secs;
+        status.remaining_secs = config.break_secs;
+        status.long_break = false;
     }
     if !was_running {
         state.running.store(true, Ordering::Relaxed);
         let running = state.running.clone();
         let app_for_thread = app.clone();
         *state.handle.lock() = Some(thread::spawn(move || {
-            run_cycles(app_for_thread, running, work_secs, break_secs, "break");
+            run_cycles(app_for_thread, running, config, "break");
         }));
     }
     show_lock_overlays(app);
@@ -339,27 +366,40 @@ fn toggle_main_window<R: tauri::Runtime>(app: &AppHandle<R>) {
 fn start_pomodoro<R: tauri::Runtime>(
     work_secs: u64,
     break_secs: u64,
+    long_break_secs: u64,
+    cycles_per_long_break: u64,
     state: State<'_, TimerState>,
     app: AppHandle<R>,
 ) -> Result<(), String> {
     if work_secs == 0 || break_secs == 0 {
         return Err("工作与休息时长必须大于 0 秒".into());
     }
+    // cycles_per_long_break 为 0 表示禁用长休息
+    if cycles_per_long_break > 0 && long_break_secs == 0 {
+        return Err("长休息时长必须大于 0 秒".into());
+    }
     kill_worker(&state);
     close_lock_overlays(&app); // 休息中被重新开始时撤掉旧遮罩
-    *state.config.lock() = (work_secs, break_secs);
+    *state.config.lock() = TimerConfig {
+        work_secs,
+        break_secs,
+        long_break_secs,
+        cycles_per_long_break,
+    };
     {
         let mut status = state.status.lock();
         status.running = true;
         status.phase = "work".to_string();
         status.remaining_secs = work_secs;
         status.cycle = 1;
+        status.long_break = false;
     }
     state.running.store(true, Ordering::Relaxed);
     let _ = app.emit("phase-changed", status_snapshot(&state));
+    let config = *state.config.lock();
     let running = state.running.clone();
     *state.handle.lock() = Some(thread::spawn(move || {
-        run_cycles(app, running, work_secs, break_secs, "work");
+        run_cycles(app, running, config, "work");
     }));
     Ok(())
 }
@@ -547,7 +587,7 @@ mod tests {
     fn rejects_zero_durations() {
         let (app, _app) = app_with_state();
         let state = app.state::<TimerState>();
-        let err = start_pomodoro(0, 60, state, app.clone()).unwrap_err();
+        let err = start_pomodoro(0, 60, 900, 4, state, app.clone()).unwrap_err();
         assert!(err.contains("大于 0"));
     }
 
@@ -568,7 +608,12 @@ mod tests {
         let (app, _app) = app_with_state();
         {
             let state = app.state::<TimerState>();
-            *state.config.lock() = (4, 2); // work 4s / break 2s，缩短测试时长
+            *state.config.lock() = TimerConfig {
+                work_secs: 4,
+                break_secs: 2,
+                long_break_secs: 8,
+                cycles_per_long_break: 2,
+            }; // work 4s / break 2s，缩短测试时长
         }
         start_break_now(app.clone()).expect("start_break_now failed");
         {
@@ -589,7 +634,7 @@ mod tests {
     #[test]
     fn running_timer_takes_over_break() {
         let (app, _app) = app_with_state();
-        start_pomodoro(60, 5, app.state(), app.clone()).expect("start failed");
+        start_pomodoro(60, 5, 30, 2, app.state(), app.clone()).expect("start failed");
         // 工作相位开始 1 tick 后仍在 work
         wait_for(&app, |s| s.phase == "work" && s.remaining_secs < 60);
         start_break_now(app.clone()).expect("start_break_now failed");
