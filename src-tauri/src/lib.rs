@@ -2,7 +2,7 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -77,6 +77,18 @@ fn finish_break<R: tauri::Runtime>(state: &TimerState, app: &AppHandle<R>) {
     let _ = app.emit("phase-changed", status.clone());
 }
 
+// 以单调时钟锚定节拍：每 tick 落在精确的 1s 网格上，消除
+// sleep(1s) + 处理耗时的累计漂移。Instant 基于 CLOCK_MONOTONIC，
+// 不统计挂起时长——系统休眠时倒计时停在暂停点（产品决策），
+// 唤醒后节拍自然续走，不追补真实时间。
+fn pace_tick(next_tick: &mut Instant) {
+    *next_tick += Duration::from_secs(1);
+    let now = Instant::now();
+    if *next_tick > now {
+        thread::sleep(*next_tick - now);
+    }
+}
+
 /// 计时工作线程：每秒一 tick，始终以共享 status 为准（本地不缓存可变副本，
 /// 这样 start_break_now 在运行中改写 status 也能被接管）。
 fn run_cycles<R: tauri::Runtime>(
@@ -101,8 +113,9 @@ fn run_cycles<R: tauri::Runtime>(
     }
 
     let mut last_phase = String::new();
+    let mut next_tick = Instant::now();
     loop {
-        thread::sleep(Duration::from_secs(1));
+        pace_tick(&mut next_tick);
         if !running.load(Ordering::Relaxed) {
             return;
         }
@@ -438,6 +451,34 @@ mod tests {
     use super::*;
     use tauri::test::{mock_builder, mock_context, noop_assets};
     use tauri::{App, AppHandle};
+
+    #[test]
+    fn pace_tick_anchors_to_one_second_grid() {
+        let mut next = Instant::now();
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            pace_tick(&mut next);
+        }
+        // 锚定后 3 tick 与 3s 网格偏差极小（修复前每 tick 累积处理耗时漂移）
+        let elapsed = t0.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(2950),
+            "too fast: {elapsed:?}"
+        );
+        assert!(
+            elapsed <= Duration::from_millis(3150),
+            "too slow: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn pace_tick_skips_sleep_when_behind_schedule() {
+        // 落后网格（如处理超时/挂起恢复）时立即补发 tick，不再额外睡眠
+        let mut next = Instant::now() - Duration::from_secs(2);
+        let t0 = Instant::now();
+        pace_tick(&mut next);
+        assert!(t0.elapsed() < Duration::from_millis(100));
+    }
 
     fn app_with_state() -> (
         AppHandle<tauri::test::MockRuntime>,
