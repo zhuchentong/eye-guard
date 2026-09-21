@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -134,8 +134,70 @@ fn run_cycles<R: tauri::Runtime>(
     }
 }
 
+// —— Wayland：layer-shell 按显示器锚定（仅 Linux 编译）——
+
+#[cfg(target_os = "linux")]
+fn layer_shell_available() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some() && gtk_layer_shell::is_supported()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn layer_shell_available() -> bool {
+    false
+}
+
+// 将窗口初始化为覆盖指定显示器的 layer-surface（Overlay 层、四边锚定、独占整屏）。
+// 返回 true 表示已锚定并映射；false 由调用方回退到 fullscreen + set_position 常规路径。
+#[cfg(target_os = "linux")]
+fn attach_layer_monitor<R: tauri::Runtime>(
+    wx: &tauri::WebviewWindow<R>,
+    pos: (i32, i32),
+    fallback_index: usize,
+) -> bool {
+    use gtk::prelude::*;
+    use gtk_layer_shell::LayerShell as _;
+
+    let Ok(gw) = wx.gtk_window() else {
+        return false;
+    };
+    let display = gw.display();
+    // tauri/tao 与 GDK 的枚举顺序不保证一致：按显示器左上角几何匹配，索引兜底
+    let mut target = None;
+    for mi in 0..display.n_monitors() {
+        if let Some(gm) = display.monitor(mi) {
+            let g = gm.geometry();
+            if (g.x(), g.y()) == pos {
+                target = Some(gm);
+                break;
+            }
+        }
+    }
+    let Some(gm) = target.or_else(|| display.monitor(fallback_index as i32)) else {
+        return false;
+    };
+
+    gw.init_layer_shell();
+    gw.set_layer(gtk_layer_shell::Layer::Overlay);
+    for edge in [
+        gtk_layer_shell::Edge::Top,
+        gtk_layer_shell::Edge::Bottom,
+        gtk_layer_shell::Edge::Left,
+        gtk_layer_shell::Edge::Right,
+    ] {
+        gw.set_anchor(edge, true);
+    }
+    gw.set_monitor(&gm);
+    // -1：覆盖整块显示器，不为任何面板留位
+    gw.set_exclusive_zone(-1);
+    // Tauri 的 show() 经事件队列异步派发，而 layer 初始化必须在映射前完成；
+    // 用 GTK 同步 show 立即映射窗口
+    gw.show_all();
+    gw.window().is_some()
+}
+
 /// 为每个显示器建一个 frameless 全屏遮罩窗口。
-/// Wayland：忽略逐屏定位，落在焦点输出（已接受）；X11/Windows/macOS 逐屏覆盖。
+/// Linux + Wayland（合成器支持 layer-shell）：每窗口锚定到对应显示器（Overlay 层）；
+/// 其余平台及回退路径：fullscreen + set_position 逐屏覆盖。
 fn show_lock_overlays<R: tauri::Runtime>(app: &AppHandle<R>) {
     // 经主窗口枚举显示器（主窗口仅隐藏不销毁，枚举不受关窗隐藏影响；
     // AppHandle 级 available_monitors 在 tauri test mock runtime 上未实现）
@@ -143,9 +205,14 @@ fn show_lock_overlays<R: tauri::Runtime>(app: &AppHandle<R>) {
         .get_webview_window("main")
         .and_then(|w| w.available_monitors().ok())
         .unwrap_or_default();
+    if monitors.is_empty() {
+        return; // 如 test mock runtime：无显示器枚举，跳过后续一切 GTK 探测
+    }
     // GTK/Wayland 表面必须在主线程创建（计时器线程直接 build 无法映射）
     let app2 = app.clone();
     let result = app.run_on_main_thread(move || {
+        // 仅 Wayland 且合成器支持 layer-shell 时走锚定路径
+        let use_layer = layer_shell_available();
         for (i, m) in monitors.iter().enumerate() {
             let label = format!("lock-{i}");
             if app2.get_webview_window(&label).is_some() {
@@ -160,16 +227,29 @@ fn show_lock_overlays<R: tauri::Runtime>(app: &AppHandle<R>) {
                 .maximizable(false)
                 .minimizable(false)
                 .skip_taskbar(true)
-                // macOS 原生 fullscreen 会创建独立 Space 且切换慢，改用 bounds + 置顶
-                .fullscreen(!cfg!(target_os = "macos"))
-                .always_on_top(true)
+                // layer 路径：先隐藏建窗，初始化 layer-shell 后同步映射；
+                // 四边锚定即覆盖显示器，不走 fullscreen 的 configure 握手
+                .visible(!use_layer)
+                .fullscreen(!cfg!(target_os = "macos") && !use_layer)
+                .always_on_top(!use_layer)
                 .build();
             match build {
                 Ok(w) => {
-                    let _ = w.set_position(*m.position());
-                    #[cfg(target_os = "macos")]
-                    {
-                        let _ = w.set_size(*m.size());
+                    #[allow(unused_mut)]
+                    let mut anchored = false;
+                    #[cfg(target_os = "linux")]
+                    if use_layer {
+                        anchored = attach_layer_monitor(&w, (m.position().x, m.position().y), i);
+                    }
+                    if anchored {
+                        eprintln!("[eg] {label} anchored via layer-shell");
+                    } else {
+                        let _ = w.set_position(*m.position());
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = w.set_size(*m.size());
+                        }
+                        let _ = w.show();
                     }
                     if i == 0 {
                         let _ = w.set_focus();
@@ -359,7 +439,10 @@ mod tests {
     use tauri::test::{mock_builder, mock_context, noop_assets};
     use tauri::{App, AppHandle};
 
-    fn app_with_state() -> (AppHandle<tauri::test::MockRuntime>, App<tauri::test::MockRuntime>) {
+    fn app_with_state() -> (
+        AppHandle<tauri::test::MockRuntime>,
+        App<tauri::test::MockRuntime>,
+    ) {
         let app = mock_builder()
             .plugin(tauri_plugin_notification::init())
             .manage(TimerState::default())
