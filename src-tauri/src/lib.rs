@@ -4,9 +4,10 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -404,6 +405,18 @@ fn start_break_now<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例必须最先注册：二次启动时唤出主窗口后立即退出新进程
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(TimerState::default())
@@ -417,8 +430,18 @@ pub fn run() {
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "显示/隐藏窗口", true, None::<&str>)?;
             let break_item = MenuItem::with_id(app, "break", "立即休息", true, None::<&str>)?;
+            let autostart_checked = app.autolaunch().is_enabled().unwrap_or(false);
+            let autostart_item = CheckMenuItem::with_id(
+                app,
+                "autostart",
+                "开机自启",
+                true,
+                autostart_checked,
+                None::<&str>,
+            )?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &break_item, &quit_item])?;
+            let menu =
+                Menu::with_items(app, &[&show_item, &break_item, &autostart_item, &quit_item])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -426,6 +449,18 @@ pub fn run() {
                     "show" => toggle_main_window(app),
                     "break" => {
                         let _ = trigger_break_now(app);
+                    }
+                    "autostart" => {
+                        // 点击后 CheckMenuItem 已自行切换勾选态，按新状态应用
+                        let launcher = app.autolaunch();
+                        let want_enable = !launcher.is_enabled().unwrap_or(false);
+                        if let Err(e) = if want_enable {
+                            launcher.enable()
+                        } else {
+                            launcher.disable()
+                        } {
+                            eprintln!("[eg] autostart toggle failed: {e}");
+                        }
                     }
                     "quit" => app.exit(0),
                     _ => {}

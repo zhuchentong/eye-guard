@@ -51,7 +51,7 @@ Rust tooling (run inside `src-tauri/`): `cargo fmt`, `cargo clippy`, `cargo test
 ## Important Files
 
 - `src/App.vue` — window-label dispatcher (`main` → TimerPanel, `lock-*` → LockScreen) + global styles.
-- `src-tauri/src/lib.rs` — timer state machine, worker thread, overlay/tray management, plugins (`tauri_plugin_opener`, `tauri_plugin_notification`), command registry, `#[cfg(test)]` unit tests.
+- `src-tauri/src/lib.rs` — timer state machine, worker thread, overlay/tray management, plugins (`tauri_plugin_single_instance` — must register first, `tauri_plugin_autostart` — tray 开机自启 toggle, `tauri_plugin_opener`, `tauri_plugin_notification`), command registry, `#[cfg(test)]` unit tests.
 - `src-tauri/tauri.conf.json` — identity (`com.zhuchentong.eye-guard`), single 800×600 window (label `main`), bundling; `csp` currently `null`.
 - `src-tauri/Cargo.toml` — deps: `tauri 2` (`tray-icon` feature), `tauri-plugin-opener`, `tauri-plugin-notification`, `parking_lot`, `serde`/`serde_json`; Linux-gated (`cfg(target_os = "linux")`): `gtk`/`gdk` 0.18 + `gtk-layer-shell` 0.8 (`v0_5` feature, for Wayland per-monitor lock overlays); dev-dep `tauri` with `test` feature (mock runtime); hardened release profile (lto, `panic="abort"`, strip).
 - `vite.config.ts`, `tsconfig.json`, `tsconfig.node.json` — build/typecheck config.
