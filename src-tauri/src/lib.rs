@@ -8,7 +8,16 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
+
+/// 全局快捷键：立即休息（Alt+Shift+B）。
+/// 注意：Linux 全局快捷键依赖 X11 抓取，Wayland 合成器（如 sway）不转发；
+/// Wayland 用户可改用桌面快捷键执行 `eye-guard --break`——参数会经单实例
+/// 通道转发给运行中的实例（见 single-instance 回调）。
+fn break_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyB)
+}
 
 #[derive(Clone, Debug, serde::Serialize)]
 struct PhaseStatus {
@@ -445,8 +454,12 @@ fn start_break_now<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // 单实例必须最先注册：二次启动时唤出主窗口后立即退出新进程
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        // 单实例必须最先注册：二次启动时唤出主窗口后立即退出新进程。
+        // argv 支持 --break：配合桌面快捷键在 Wayland 下触发立即休息
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv.iter().any(|a| a == "--break") {
+                let _ = trigger_break_now(app);
+            }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
                 let _ = w.show();
@@ -457,6 +470,15 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if shortcut == &break_shortcut() && event.state() == ShortcutState::Pressed {
+                        let _ = trigger_break_now(app);
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(TimerState::default())
@@ -468,6 +490,15 @@ pub fn run() {
             start_break_now
         ])
         .setup(|app| {
+            // 注册失败不致命：Wayland 合成器多不支持 X11 全局抓取（见 break_shortcut 注释）
+            if let Err(e) = app.global_shortcut().register(break_shortcut()) {
+                eprintln!("[eg] global shortcut register failed: {e}");
+            }
+            // 冷启动带 --break：启动应用后立即进入休息
+            if std::env::args().skip(1).any(|a| a == "--break") {
+                let _ = trigger_break_now(app.handle());
+            }
+
             let show_item = MenuItem::with_id(app, "show", "显示/隐藏窗口", true, None::<&str>)?;
             let break_item = MenuItem::with_id(app, "break", "立即休息", true, None::<&str>)?;
             let autostart_checked = app.autolaunch().is_enabled().unwrap_or(false);
