@@ -1,5 +1,7 @@
 # eye-guard
 
+[![CI](https://github.com/zhuchentong/eye-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/zhuchentong/eye-guard/actions/workflows/ci.yml)
+
 护眼番茄钟桌面应用：工作计时结束后自动全屏锁定遮罩，提醒你离开屏幕休息。
 
 基于 **Tauri v2 + Vue 3 + TypeScript** 构建，托盘常驻，支持多显示器。
@@ -22,7 +24,7 @@
 
 ## 开发
 
-包管理器仅使用 **pnpm**（Node ≥ 22）。
+包管理器仅使用 **pnpm**（Node ≥ 22）。`package.json` 的 `packageManager` 字段已锁定 pnpm 版本，用 `corepack enable` 即可获得正确版本。
 
 ```sh
 pnpm install
@@ -44,6 +46,8 @@ cargo test                                   # 整套约 7-15 s，含真实 1 s 
 Linux 构建依赖：`libwebkit2gtk-4.1-dev`、`libgtk-3-dev`、`libgtk-layer-shell-dev`、`libayatana-appindicator3-dev` 等（见 `.github/workflows/ci.yml`）。
 
 注意：`vite.config.ts` 的 watcher 忽略 `src-tauri/**`——改 Rust 代码需重启 `pnpm tauri dev`。端口 1420 是 `vite.config.ts` 与 `src-tauri/tauri.conf.json`（`build.devUrl`）的契约，两端必须一致。
+
+供应链时效策略：`pnpm-workspace.yaml` 声明 `minimumReleaseAge: 1440`，发布不足 24 h 的包版本会被拒绝（本地与 CI 同策略）。`pnpm add` 报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` 属预期——等包老化后重试，或在 `overrides` 中显式钉住旧版本。
 
 ## 架构速览
 
