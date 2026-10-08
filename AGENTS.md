@@ -63,6 +63,7 @@ Rust tooling (run inside `src-tauri/`): `cargo fmt`, `cargo clippy`, `cargo test
 ## Runtime/Tooling Preferences
 
 - Node side: pnpm, ESM (`"type": "module"`); never npm/yarn (lockfile drift). Tauri CLI via `pnpm tauri`.
+- pnpm 12 的设置与 overrides 唯一读取位置是 `pnpm-workspace.yaml`（package.json 的 `pnpm` 字段已废弃不再读取）。仓库显式声明 `minimumReleaseAge: 1440`（拒绝发布不足 24 h 的包版本，CI 同策略）；`tldts`/`tldts-core` 钉 7.4.16 是为绕开 2026-10-07 双发的过新版本，老化后可移除。
 - Rust: edition 2021.
 - `vite.config.ts` ignores `src-tauri/**` in its watcher — backend changes need a `pnpm tauri dev` restart.
 - Do not edit: `pnpm-lock.yaml`, `src-tauri/gen/`, `src-tauri/icons/`, `src-tauri/target/`.

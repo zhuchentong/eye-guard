@@ -1,0 +1,8 @@
+# pnpm 12：设置与 overrides 的唯一读取位置（package.json 的 pnpm 字段已废弃）
+# 供应链时效策略与 CI 默认一致：拒绝发布不足 24h 的包版本
+minimumReleaseAge: 1440
+overrides:
+  # jsdom→tough-cookie 的传递依赖；7.4.17/7.4.18 发布于 2026-10-07 晚间，
+  # 触发 CI 的 minimumReleaseAge 拒绝。老化后（>24h）可移除本钉。
+  tldts: 7.4.16
+  tldts-core: 7.4.16
