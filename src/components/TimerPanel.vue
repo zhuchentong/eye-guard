@@ -3,13 +3,21 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { type PhaseStatus } from "../types";
+import {
+  lastNDays,
+  loadStats,
+  recordCompletedCycle,
+  saveStats,
+  todayCount,
+  todayStr,
+  type DayStat,
+} from "../stats";
 import AnimatedClock from "./AnimatedClock.vue";
 
 const WORK_KEY = "eye-guard.workMin";
 const BREAK_KEY = "eye-guard.breakMin";
 const LONG_BREAK_KEY = "eye-guard.longBreakMin";
 const CYCLES_KEY = "eye-guard.cyclesPerLongBreak";
-const STATS_KEY = "eye-guard.todayStats";
 
 const phase = ref<PhaseStatus["phase"]>("idle");
 const remaining = ref(0);
@@ -28,46 +36,28 @@ const running = computed(() => phase.value !== "idle");
 
 let unlisteners: UnlistenFn[] = [];
 
-interface TodayStats {
-  date: string;
-  count: number;
+const stats = ref<DayStat[]>([]);
+const today = computed(() => todayCount(stats.value));
+const week = computed(() => lastNDays(stats.value, 7));
+const weekMax = computed(() => Math.max(1, ...week.value.map((d) => d.count)));
+
+function barHeight(count: number): string {
+  return `${Math.round((count / weekMax.value) * 100)}%`;
 }
 
-const todayStats = ref<TodayStats>({ date: "", count: 0 });
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function barLabel(date: string): string {
+  return date === todayStr() ? "今" : String(Number(date.slice(8)));
 }
 
-function loadTodayStats() {
-  try {
-    const raw = localStorage.getItem(STATS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as TodayStats;
-      if (typeof parsed.date === "string" && typeof parsed.count === "number") {
-        todayStats.value = { date: parsed.date, count: parsed.count };
-      }
-    }
-  } catch {
-    // 数据损坏时按今日 0 轮处理
-  }
-  if (todayStats.value.date !== todayStr()) {
-    todayStats.value = { date: todayStr(), count: 0 };
-  }
-}
-
-// 休息结束回到工作 = 完成一个番茄钟；跨日自动清零
-function recordCompletedCycle() {
-  const date = todayStr();
-  const count = todayStats.value.date === date ? todayStats.value.count + 1 : 1;
-  todayStats.value = { date, count };
-  localStorage.setItem(STATS_KEY, JSON.stringify(todayStats.value));
+// 休息结束回到工作 = 完成一个番茄钟（stats.ts 30 天滚动窗口持久化）
+function completeCycle() {
+  stats.value = recordCompletedCycle(stats.value);
+  saveStats(stats.value);
 }
 
 function apply(s: PhaseStatus) {
   if (phase.value === "break" && s.phase === "work" && s.cycle > 0) {
-    recordCompletedCycle();
+    completeCycle();
   }
   phase.value = s.phase;
   remaining.value = s.remaining_secs;
@@ -86,7 +76,7 @@ onMounted(async () => {
   if (Number.isFinite(savedLongBreak) && savedLongBreak >= 1) longBreakMin.value = Math.floor(savedLongBreak);
   if (Number.isFinite(savedCycles) && savedCycles >= 1) cyclesPerLongBreak.value = Math.floor(savedCycles);
   else if (localStorage.getItem(CYCLES_KEY) === "0") longBreakEnabled.value = false; // 上次禁用；输入框保留默认值便于重新启用
-  loadTodayStats();
+  stats.value = loadStats();
 
   unlisteners.push(
     await listen<PhaseStatus>("timer-tick", (e) => apply(e.payload)),
@@ -189,8 +179,23 @@ async function togglePause() {
       <span v-else>已停止</span>
       <span v-if="running"> · 第 {{ cycle }} 轮</span>
       <span v-if="paused"> · 已暂停</span>
-      <span v-if="todayStats.count > 0"> · 今日 {{ todayStats.count }} 轮</span>
+      <span v-if="today > 0"> · 今日 {{ today }} 轮</span>
     </p>
+    <div class="week">
+      <div class="bars">
+        <div
+          v-for="d in week"
+          :key="d.date"
+          class="bar"
+          :class="{ 'bar-today': d.date === todayStr() }"
+          :style="{ height: barHeight(d.count) }"
+          :title="`${d.date}：${d.count} 轮`"
+        ></div>
+      </div>
+      <div class="bar-labels">
+        <span v-for="d in week" :key="d.date">{{ barLabel(d.date) }}</span>
+      </div>
+    </div>
     <div class="row">
       <label>
         工作 <input v-model.number="workMin" type="number" min="1" :disabled="running" /> 分钟
@@ -242,7 +247,46 @@ async function togglePause() {
 }
 
 .meta {
-  margin: 0 0 1.5rem;
+  margin: 0 0 1rem;
+  color: #888;
+}
+
+.week {
+  margin: 0 auto 1.25rem;
+  width: min(18rem, 80vw);
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  height: 3.5rem;
+}
+
+.bar {
+  flex: 1;
+  min-height: 2px;
+  border-radius: 3px 3px 1px 1px;
+  background: #396cd8;
+  opacity: 0.5;
+  transition: height 0.4s ease;
+}
+
+.bar-today {
+  background: #249b73;
+  opacity: 0.85;
+}
+
+.bar-labels {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.bar-labels span {
+  flex: 1;
+  text-align: center;
+  font-size: 0.7rem;
   color: #888;
 }
 
