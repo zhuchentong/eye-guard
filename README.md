@@ -22,6 +22,16 @@
 - **全局快捷键**在 Wayland 下不可用（X11 抓取限制）：可改用桌面快捷键执行 `eye-guard --break`，参数经单实例通道转发给运行中的实例。
 - macOS：遮罩窗口不走 fullscreen，按显示器 `set_size` 适配。
 
+## 发布
+
+```sh
+pnpm release
+```
+
+交互选择版本号（patch/minor/major）后自动完成：`scripts/sync-version.mjs` 同步 `package.json` / `src-tauri/tauri.conf.json` / `Cargo.toml` / `Cargo.lock` 四处版本 → 提交（`chore(release): 🔖 发布 v*`）→ 打 `v*` tag → 推送。tag 触发 GitHub Actions（`release.yml`）构建 Linux 产物（deb/rpm/AppImage）并发布 GitHub Release（自动生成 notes）。
+
+注意：`pnpm release` 要求干净工作树；tag 与 `tauri.conf.json` 版本不一致时流水线会拒绝构建。
+
 ## 开发
 
 包管理器仅使用 **pnpm**（Node ≥ 22）。`package.json` 的 `packageManager` 字段已锁定 pnpm 版本，用 `corepack enable` 即可获得正确版本。
