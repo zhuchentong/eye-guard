@@ -93,6 +93,57 @@ fn send_break_notice<R: tauri::Runtime>(app: &AppHandle<R>) {
         .show();
 }
 
+/// 休息结束（自然到期或跳过）的统一提示。
+fn send_break_end_notice<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let _ = app
+        .notification()
+        .builder()
+        .title("eye-guard")
+        .body("休息结束，开始下一轮工作")
+        .show();
+}
+
+/// 托盘标题文本：相位 + 分钟级剩余时间；暂停显示「暂停」；idle 返回空串（清空标题）。
+fn tray_title(status: &PhaseStatus) -> String {
+    match status.phase.as_str() {
+        "work" if status.paused => {
+            format!(
+                "暂停 {}:{:02}",
+                status.remaining_secs / 60,
+                status.remaining_secs % 60
+            )
+        }
+        "work" => format!(
+            "工作 {}:{:02}",
+            status.remaining_secs / 60,
+            status.remaining_secs % 60
+        ),
+        "break" => format!(
+            "{} {:02}:{:02}",
+            if status.long_break {
+                "长休息"
+            } else {
+                "休息"
+            },
+            status.remaining_secs / 60,
+            status.remaining_secs % 60
+        ),
+        _ => String::new(),
+    }
+}
+
+/// 同步托盘标题（Linux AppIndicator 支持 title；Windows 不支持则静默忽略）。
+/// GTK 调用须经主线程，经 run_on_main_thread 派发；无托盘环境（mock runtime）跳过。
+fn update_tray_status<R: tauri::Runtime>(app: &AppHandle<R>, status: &PhaseStatus) {
+    let title = tray_title(status);
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(tray) = app2.tray_by_id("main") {
+            let _ = tray.set_title(Some(title));
+        }
+    });
+}
+
 /// 休息结束的统一转换（自然到期与 end_break_early 共用）：
 /// 撤遮罩 → cycle+1 → 回到 work。线程循环与命令都经 status 锁串行化。
 fn finish_break<R: tauri::Runtime>(state: &TimerState, app: &AppHandle<R>) {
@@ -107,6 +158,8 @@ fn finish_break<R: tauri::Runtime>(state: &TimerState, app: &AppHandle<R>) {
     status.long_break = false;
     status.paused = false;
     let _ = app.emit("phase-changed", status.clone());
+    send_break_end_notice(app);
+    update_tray_status(app, &status);
 }
 
 // 以单调时钟锚定节拍：每 tick 落在精确的 1s 网格上，消除
@@ -191,6 +244,11 @@ fn run_cycles<R: tauri::Runtime>(
             }
         } else if phase == "break" && remaining == 0 {
             finish_break(&state, &app);
+        }
+
+        // 托盘标题按 相位变化/分钟边界 节流同步（避免每秒 dbus 通信）
+        if phase_started || remaining % 60 == 0 {
+            update_tray_status(&app, &status_snapshot(&state));
         }
     }
 }
@@ -368,7 +426,9 @@ fn trigger_break_now<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<(), String
         }));
     }
     show_lock_overlays(app);
-    let _ = app.emit("phase-changed", status_snapshot(&state));
+    let snap = status_snapshot(&state);
+    let _ = app.emit("phase-changed", snap.clone());
+    update_tray_status(app, &snap);
     Ok(())
 }
 
@@ -418,7 +478,9 @@ fn start_pomodoro<R: tauri::Runtime>(
         status.paused = false;
     }
     state.running.store(true, Ordering::Relaxed);
-    let _ = app.emit("phase-changed", status_snapshot(&state));
+    let snap = status_snapshot(&state);
+    let _ = app.emit("phase-changed", snap.clone());
+    update_tray_status(&app, &snap);
     let config = *state.config.lock();
     let running = state.running.clone();
     *state.handle.lock() = Some(thread::spawn(move || {
@@ -441,6 +503,7 @@ fn stop_pomodoro<R: tauri::Runtime>(
     status.remaining_secs = 0;
     status.cycle = 0;
     status.paused = false;
+    update_tray_status(&app, &status);
     Ok(())
 }
 
@@ -483,7 +546,9 @@ fn pause_pomodoro<R: tauri::Runtime>(
         }
         status.paused = true;
     }
-    let _ = app.emit("phase-changed", status_snapshot(&state));
+    let snap = status_snapshot(&state);
+    let _ = app.emit("phase-changed", snap.clone());
+    update_tray_status(&app, &snap);
     Ok(())
 }
 
@@ -503,7 +568,9 @@ fn resume_pomodoro<R: tauri::Runtime>(
         }
         status.paused = false;
     }
-    let _ = app.emit("phase-changed", status_snapshot(&state));
+    let snap = status_snapshot(&state);
+    let _ = app.emit("phase-changed", snap.clone());
+    update_tray_status(&app, &snap);
     Ok(())
 }
 
@@ -774,5 +841,23 @@ mod tests {
         assert!(err.contains("work"));
         resume_pomodoro(app.state(), app.clone()).expect_err("resume must reject too");
         stop_pomodoro(app.state(), app.clone()).expect("stop failed");
+    }
+
+    /// 托盘标题：相位 + 分钟级剩余时间；暂停显示「暂停」；idle 返回空串（清空标题）。
+    #[test]
+    fn tray_title_reflects_phase_and_pause() {
+        let mk = |phase: &str, remaining_secs: u64, long_break: bool, paused: bool| PhaseStatus {
+            running: phase != "idle",
+            phase: phase.to_string(),
+            remaining_secs,
+            cycle: 1,
+            long_break,
+            paused,
+        };
+        assert_eq!(tray_title(&mk("work", 1499, false, false)), "工作 24:59");
+        assert_eq!(tray_title(&mk("work", 1499, false, true)), "暂停 24:59");
+        assert_eq!(tray_title(&mk("break", 299, false, false)), "休息 04:59");
+        assert_eq!(tray_title(&mk("break", 900, true, false)), "长休息 15:00");
+        assert_eq!(tray_title(&mk("idle", 0, false, false)), "");
     }
 }
