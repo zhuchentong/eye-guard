@@ -12,7 +12,7 @@
 - 托盘常驻：显示/隐藏窗口、立即休息、开机自启、退出；托盘标题实时显示剩余时间（如「工作 24:59」；GNOME 的 AppIndicator 扩展可能不渲染标题）；主窗口关窗即隐藏到托盘
 - 单实例：二次启动唤出已有实例；`eye-guard --break` 可立即触发休息
 - 全局快捷键 `Alt+Shift+B`：立即休息
-- 今日完成轮数统计（前端本地持久化，跨日自动清零）
+- 今日完成轮数统计与近 7 天 mini 条形图（前端本地持久化，30 天滚动窗口，跨日自动归档）
 
 ## 平台说明
 
@@ -28,6 +28,7 @@
 pnpm install
 pnpm dev            # Vite dev server，http://localhost:1420（strictPort，勿改）
 pnpm build          # vue-tsc --noEmit && vite build
+pnpm test           # vitest run（jsdom，统计逻辑单测）
 pnpm tauri dev      # 完整桌面应用
 pnpm tauri build    # 发布打包
 ```
