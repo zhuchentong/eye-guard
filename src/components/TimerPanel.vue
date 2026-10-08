@@ -15,10 +15,13 @@ const phase = ref<PhaseStatus["phase"]>("idle");
 const remaining = ref(0);
 const cycle = ref(0);
 const longBreak = ref(false);
+const paused = ref(false);
 const workMin = ref(25);
 const breakMin = ref(5);
 const longBreakMin = ref(15);
 const cyclesPerLongBreak = ref(4);
+// 长休息开关：关闭时 cyclesPerLongBreak 以 0 持久化（后端 0 = 禁用）
+const longBreakEnabled = ref(true);
 const error = ref("");
 
 const running = computed(() => phase.value !== "idle");
@@ -70,6 +73,7 @@ function apply(s: PhaseStatus) {
   remaining.value = s.remaining_secs;
   cycle.value = s.cycle;
   longBreak.value = s.long_break;
+  paused.value = s.paused;
 }
 
 onMounted(async () => {
@@ -81,6 +85,7 @@ onMounted(async () => {
   if (Number.isFinite(savedBreak) && savedBreak >= 1) breakMin.value = Math.floor(savedBreak);
   if (Number.isFinite(savedLongBreak) && savedLongBreak >= 1) longBreakMin.value = Math.floor(savedLongBreak);
   if (Number.isFinite(savedCycles) && savedCycles >= 1) cyclesPerLongBreak.value = Math.floor(savedCycles);
+  else if (localStorage.getItem(CYCLES_KEY) === "0") longBreakEnabled.value = false; // 上次禁用；输入框保留默认值便于重新启用
   loadTodayStats();
 
   unlisteners.push(
@@ -102,7 +107,9 @@ onUnmounted(() => {
 watch(workMin, (v) => localStorage.setItem(WORK_KEY, String(v)));
 watch(breakMin, (v) => localStorage.setItem(BREAK_KEY, String(v)));
 watch(longBreakMin, (v) => localStorage.setItem(LONG_BREAK_KEY, String(v)));
-watch(cyclesPerLongBreak, (v) => localStorage.setItem(CYCLES_KEY, String(v)));
+watch([longBreakEnabled, cyclesPerLongBreak], ([enabled, cycles]) => {
+  localStorage.setItem(CYCLES_KEY, String(enabled ? cycles : 0));
+});
 
 async function start() {
   error.value = "";
@@ -110,7 +117,7 @@ async function start() {
     error.value = "工作与休息时长必须 ≥ 1 分钟";
     return;
   }
-  if (!(cyclesPerLongBreak.value >= 1) || !(longBreakMin.value >= 1)) {
+  if (longBreakEnabled.value && (!(cyclesPerLongBreak.value >= 1) || !(longBreakMin.value >= 1))) {
     error.value = "长休息周期与时长必须 ≥ 1";
     return;
   }
@@ -119,12 +126,13 @@ async function start() {
       workSecs: Math.floor(workMin.value) * 60,
       breakSecs: Math.floor(breakMin.value) * 60,
       longBreakSecs: Math.floor(longBreakMin.value) * 60,
-      cyclesPerLongBreak: Math.floor(cyclesPerLongBreak.value),
+      cyclesPerLongBreak: longBreakEnabled.value ? Math.floor(cyclesPerLongBreak.value) : 0,
     });
     phase.value = "work";
     remaining.value = Math.floor(workMin.value) * 60;
     cycle.value = 1;
     longBreak.value = false;
+    paused.value = false;
   } catch (e) {
     error.value = String(e);
   }
@@ -138,6 +146,7 @@ async function stop() {
     remaining.value = 0;
     cycle.value = 0;
     longBreak.value = false;
+    paused.value = false;
   } catch (e) {
     error.value = String(e);
   }
@@ -149,6 +158,19 @@ async function startNow() {
   try {
     await invoke("start_break_now");
     phase.value = "break";
+    paused.value = false;
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
+// 暂停/继续：乐观更新本地状态，phase-changed/timer-tick 事件随后校正
+async function togglePause() {
+  error.value = "";
+  const next = !paused.value;
+  try {
+    await invoke(next ? "pause_pomodoro" : "resume_pomodoro");
+    paused.value = next;
   } catch (e) {
     error.value = String(e);
   }
@@ -158,7 +180,7 @@ async function startNow() {
 <template>
   <main class="container">
     <h1>eye-guard</h1>
-    <div class="clock" :class="phase">
+    <div class="clock" :class="[phase, { paused }]">
       <AnimatedClock :value="remaining" />
     </div>
     <p class="meta">
@@ -166,6 +188,7 @@ async function startNow() {
       <span v-else-if="phase === 'break'">{{ longBreak ? "长休息" : "休息" }}</span>
       <span v-else>已停止</span>
       <span v-if="running"> · 第 {{ cycle }} 轮</span>
+      <span v-if="paused"> · 已暂停</span>
       <span v-if="todayStats.count > 0"> · 今日 {{ todayStats.count }} 轮</span>
     </p>
     <div class="row">
@@ -178,15 +201,19 @@ async function startNow() {
     </div>
     <div class="row">
       <label>
-        每 <input v-model.number="cyclesPerLongBreak" type="number" min="1" :disabled="running" /> 轮
+        <input v-model="longBreakEnabled" type="checkbox" :disabled="running" /> 长休息
       </label>
       <label>
-        长休息 <input v-model.number="longBreakMin" type="number" min="1" :disabled="running" /> 分钟
+        每 <input v-model.number="cyclesPerLongBreak" type="number" min="1" :disabled="running || !longBreakEnabled" /> 轮
+      </label>
+      <label>
+        时长 <input v-model.number="longBreakMin" type="number" min="1" :disabled="running || !longBreakEnabled" /> 分钟
       </label>
     </div>
     <div class="row">
       <button :disabled="running" @click="start">开始</button>
       <button :disabled="!running" @click="stop">停止</button>
+      <button :disabled="phase !== 'work'" @click="togglePause">{{ paused ? "继续" : "暂停" }}</button>
       <button :disabled="phase === 'break'" @click="startNow">立即执行</button>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
@@ -208,6 +235,10 @@ async function startNow() {
 
 .clock.break {
   color: #249b73;
+}
+
+.clock.paused {
+  opacity: 0.45;
 }
 
 .meta {
@@ -236,6 +267,14 @@ label {
 input {
   width: 4.5em;
   text-align: center;
+}
+
+input[type="checkbox"] {
+  width: auto;
+  padding: 0.1em;
+  border: none;
+  box-shadow: none;
+  accent-color: #249b73;
 }
 
 .error {

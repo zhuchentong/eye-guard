@@ -5,6 +5,8 @@ export interface PhaseStatus {
   cycle: number;
   /** phase === "break" 时：本次是否为长休息 */
   long_break: boolean;
+  /** 暂停中：倒计时冻结，相位保持不变 */
+  paused: boolean;
 }
 
 export function formatClock(secs: number): string {

@@ -28,6 +28,8 @@ struct PhaseStatus {
     cycle: u64,
     /// phase == "break" 时：本次是否为长休息
     long_break: bool,
+    /// 暂停中：倒计时冻结，相位保持不变
+    paused: bool,
 }
 
 /// 计时配置，start_pomodoro 时写入
@@ -58,6 +60,7 @@ impl Default for TimerState {
                 remaining_secs: 0,
                 cycle: 0,
                 long_break: false,
+                paused: false,
             }),
             config: Mutex::new(TimerConfig {
                 work_secs: 1500,
@@ -102,6 +105,7 @@ fn finish_break<R: tauri::Runtime>(state: &TimerState, app: &AppHandle<R>) {
     status.phase = "work".to_string();
     status.remaining_secs = state.config.lock().work_secs;
     status.long_break = false;
+    status.paused = false;
     let _ = app.emit("phase-changed", status.clone());
 }
 
@@ -138,6 +142,7 @@ fn run_cycles<R: tauri::Runtime>(
         };
         status.running = true;
         status.long_break = false;
+        status.paused = false; // 新线程从干净状态起步（当前 spawn 点均已清，防御性收敛不变量）
     }
 
     let mut last_phase = String::new();
@@ -147,15 +152,21 @@ fn run_cycles<R: tauri::Runtime>(
         if !running.load(Ordering::Relaxed) {
             return;
         }
-        let (phase, remaining) = {
+        let (phase, remaining, paused) = {
             let mut status = state.status.lock();
-            status.remaining_secs = status.remaining_secs.saturating_sub(1);
+            // 暂停时冻结递减；tick 仍按 1s 网格推进，恢复无需重新锚定 next_tick
+            if !status.paused {
+                status.remaining_secs = status.remaining_secs.saturating_sub(1);
+            }
             let _ = app.emit("timer-tick", status.clone());
-            (status.phase.clone(), status.remaining_secs)
+            (status.phase.clone(), status.remaining_secs, status.paused)
         };
         let phase_started = phase != last_phase;
         last_phase.clone_from(&phase);
 
+        if paused {
+            continue; // 暂停中不做相位转换（remaining 冻结，转换条件本也不成立）
+        }
         if phase == "work" {
             if remaining == 0 {
                 show_lock_overlays(&app);
@@ -167,6 +178,7 @@ fn run_cycles<R: tauri::Runtime>(
                         && status.cycle % config.cycles_per_long_break == 0;
                     status.phase = "break".to_string();
                     status.long_break = is_long;
+                    status.paused = false; // 相位转换重置暂停态（覆盖转换窗口内的竞态）
                     status.remaining_secs = if is_long {
                         config.long_break_secs
                     } else {
@@ -345,6 +357,7 @@ fn trigger_break_now<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<(), String
         status.phase = "break".to_string();
         status.remaining_secs = config.break_secs;
         status.long_break = false;
+        status.paused = false; // 接管时必须清 paused，否则工作线程冻结递减
     }
     if !was_running {
         state.running.store(true, Ordering::Relaxed);
@@ -402,6 +415,7 @@ fn start_pomodoro<R: tauri::Runtime>(
         status.remaining_secs = work_secs;
         status.cycle = 1;
         status.long_break = false;
+        status.paused = false;
     }
     state.running.store(true, Ordering::Relaxed);
     let _ = app.emit("phase-changed", status_snapshot(&state));
@@ -426,6 +440,7 @@ fn stop_pomodoro<R: tauri::Runtime>(
     status.phase = "idle".to_string();
     status.remaining_secs = 0;
     status.cycle = 0;
+    status.paused = false;
     Ok(())
 }
 
@@ -449,6 +464,47 @@ fn end_break_early<R: tauri::Runtime>(
 #[tauri::command]
 fn start_break_now<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
     trigger_break_now(&app)
+}
+
+/// 暂停：仅工作相位可用（break 由锁屏接管，冻结会让遮罩停在满值）。
+/// 相位不变，倒计时冻结。重复暂停幂等。
+#[tauri::command]
+fn pause_pomodoro<R: tauri::Runtime>(
+    state: State<'_, TimerState>,
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    {
+        let mut status = state.status.lock();
+        if status.phase != "work" {
+            return Err("pause only allowed during work".into());
+        }
+        if status.paused {
+            return Ok(());
+        }
+        status.paused = true;
+    }
+    let _ = app.emit("phase-changed", status_snapshot(&state));
+    Ok(())
+}
+
+/// 恢复：继续递减。仅工作相位；未暂停时幂等。
+#[tauri::command]
+fn resume_pomodoro<R: tauri::Runtime>(
+    state: State<'_, TimerState>,
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    {
+        let mut status = state.status.lock();
+        if status.phase != "work" {
+            return Err("resume only allowed during work".into());
+        }
+        if !status.paused {
+            return Ok(());
+        }
+        status.paused = false;
+    }
+    let _ = app.emit("phase-changed", status_snapshot(&state));
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -487,7 +543,9 @@ pub fn run() {
             stop_pomodoro,
             get_status,
             end_break_early,
-            start_break_now
+            start_break_now,
+            pause_pomodoro,
+            resume_pomodoro
         ])
         .setup(|app| {
             // 注册失败不致命：Wayland 合成器多不支持 X11 全局抓取（见 break_shortcut 注释）
@@ -672,6 +730,49 @@ mod tests {
         wait_for(&app, |s| s.phase == "break" && s.remaining_secs < 5);
         // 休息结束自动循环回工作，cycle 递增
         wait_for(&app, |s| s.phase == "work" && s.cycle == 2);
+        stop_pomodoro(app.state(), app.clone()).expect("stop failed");
+    }
+
+    /// 暂停冻结倒计时，恢复后继续递减。
+    #[test]
+    fn pause_freezes_and_resume_continues() {
+        let (app, _app) = app_with_state();
+        start_pomodoro(60, 5, 30, 2, app.state(), app.clone()).expect("start failed");
+        wait_for(&app, |s| s.phase == "work" && s.remaining_secs < 60);
+        pause_pomodoro(app.state(), app.clone()).expect("pause failed");
+        let frozen = status_snapshot(&app.state::<TimerState>()).remaining_secs;
+        assert!(frozen > 0);
+        thread::sleep(Duration::from_millis(2300));
+        let still = status_snapshot(&app.state::<TimerState>());
+        assert!(still.paused, "status must report paused");
+        assert_eq!(still.remaining_secs, frozen, "paused countdown must freeze");
+        resume_pomodoro(app.state(), app.clone()).expect("resume failed");
+        wait_for(&app, |s| s.remaining_secs < frozen);
+        stop_pomodoro(app.state(), app.clone()).expect("stop failed");
+    }
+
+    /// 关键并发路径：暂停中被 start_break_now 接管时必须清除 paused，
+    /// 否则工作线程继续冻结递减，休息倒计时会永久停在满值。
+    #[test]
+    fn break_takeover_clears_pause() {
+        let (app, _app) = app_with_state();
+        start_pomodoro(60, 4, 30, 2, app.state(), app.clone()).expect("start failed");
+        wait_for(&app, |s| s.phase == "work" && s.remaining_secs < 60);
+        pause_pomodoro(app.state(), app.clone()).expect("pause failed");
+        start_break_now(app.clone()).expect("start_break_now failed");
+        wait_for(&app, |s| s.phase == "break" && s.remaining_secs < 4);
+        stop_pomodoro(app.state(), app.clone()).expect("stop failed");
+    }
+
+    /// 暂停仅在工作相位可用：break 相位（锁屏接管中）必须拒绝，
+    /// 否则主窗口「继续」按钮不可用（phase !== 'work' 禁用），遮罩倒计时冻结在满值。
+    #[test]
+    fn pause_rejects_when_not_in_work() {
+        let (app, _app) = app_with_state();
+        start_break_now(app.clone()).expect("start_break_now failed");
+        let err = pause_pomodoro(app.state(), app.clone()).unwrap_err();
+        assert!(err.contains("work"));
+        resume_pomodoro(app.state(), app.clone()).expect_err("resume must reject too");
         stop_pomodoro(app.state(), app.clone()).expect("stop failed");
     }
 }
