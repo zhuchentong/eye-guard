@@ -41,7 +41,7 @@ Rust tooling (run inside `src-tauri/`): `cargo fmt`, `cargo clippy`, `cargo test
 
 **Port 1420 is contractual**: `vite.config.ts` `strictPort` must match `tauri.conf.json` `build.devUrl`. Never change one without the other.
 
-发布：`pnpm release`（bumpp 交互）→ `bump.config.ts` 的 execute 钩子经 `scripts/sync-version.mjs` 同步四处版本（带替换计数守卫）→ 提交 + `v*` tag → `release.yml` 构建 deb/rpm/AppImage 并发 Release。手动验证流水线：Actions 页 `workflow_dispatch`。
+发布：`pnpm release`（bumpp 交互）→ `bump.config.ts` 的 execute 钩子经 `scripts/sync-version.mjs` 同步四处版本（带替换计数守卫）→ 提交 + `v*` tag → `release.yml` 构建 deb/rpm/AppImage 并发 Release。手动验证流水线：Actions 页 `workflow_dispatch`。注意：bumpp 必须保持 `commit.all: true`（默认路径限定提交会丢弃 sync 文件）；release 上传 glob 显式三目录（宽 glob 会把 AppImage 解包文件一起传并触发次级限流）。
 
 ## Code Conventions & Common Patterns
 

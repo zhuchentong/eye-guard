@@ -55,5 +55,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/release/bundle/**/*
+          # 显式三类：APPIMAGE_EXTRACT_AND_RUN 会在 bundle/ 留下解包文件，
+          # 宽 glob 会把数百个运行时文件一起上传并触发次级限流
+          files: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
           generate_release_notes: true
