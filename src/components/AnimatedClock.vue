@@ -12,21 +12,9 @@ const seconds = computed(() => props.value % 60);
 </script>
 
 <template>
-  <span class="aclock">
+  <span class="inline-flex items-baseline tabular-nums">
     <NumberFlow :value="minutes" :format="DIGIT_FORMAT" />
-    <span class="colon">:</span>
+    <span class="inline-block">:</span>
     <NumberFlow :value="seconds" :format="DIGIT_FORMAT" />
   </span>
 </template>
-
-<style scoped>
-.aclock {
-  display: inline-flex;
-  align-items: baseline;
-  font-variant-numeric: tabular-nums;
-}
-
-.colon {
-  display: inline-block;
-}
-</style>

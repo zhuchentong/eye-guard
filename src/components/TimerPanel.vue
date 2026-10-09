@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { type PhaseStatus } from "../types";
 import {
+  DISPLAY_DAYS,
   lastNDays,
   loadStats,
   recordCompletedCycle,
@@ -13,6 +14,12 @@ import {
   type DayStat,
 } from "../stats";
 import AnimatedClock from "./AnimatedClock.vue";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const WORK_KEY = "eye-guard.workMin";
 const BREAK_KEY = "eye-guard.breakMin";
@@ -38,16 +45,77 @@ let unlisteners: UnlistenFn[] = [];
 
 const stats = ref<DayStat[]>([]);
 const today = computed(() => todayCount(stats.value));
-const week = computed(() => lastNDays(stats.value, 7));
-const weekMax = computed(() => Math.max(1, ...week.value.map((d) => d.count)));
 
-function barHeight(count: number): string {
-  return `${Math.round((count / weekMax.value) * 100)}%`;
+// —— 近 26 周（半年）贡献热力图：列 = 周，行 = 周一..周日（存储窗口仍保留 53 周）——
+type HeatCell = { key: string; date: string | null; count: number };
+
+const heatmapDays = computed(() => lastNDays(stats.value, DISPLAY_DAYS));
+
+const heatMax = computed(() => Math.max(1, ...heatmapDays.value.map((d) => d.count)));
+
+// 首列按起始日星期几补空位，使行对齐周一..周日；53-54 列
+const heatmapColumns = computed<HeatCell[][]>(() => {
+  const first = new Date(`${heatmapDays.value[0].date}T00:00:00`);
+  const offset = (first.getDay() + 6) % 7; // 周一 = 0
+  const columns: HeatCell[][] = [];
+  let col: HeatCell[] = [];
+  for (let i = 0; i < offset; i++) col.push({ key: `pad-${i}`, date: null, count: 0 });
+  for (const d of heatmapDays.value) {
+    col.push({ key: d.date, date: d.date, count: d.count });
+    if (col.length === 7) {
+      columns.push(col);
+      col = [];
+    }
+  }
+  if (col.length > 0) columns.push(col);
+  return columns;
+});
+
+// 5 档色阶：0 = 空，其余按占比归一化（max 下限 1 防除零）
+function heatLevel(count: number): number {
+  return count === 0 ? 0 : Math.min(4, Math.ceil((count / heatMax.value) * 4));
 }
 
-function barLabel(date: string): string {
-  return date === todayStr() ? "今" : String(Number(date.slice(8)));
+// GitHub 五档色阶 → tailwind 类（静态字面量，供 v4 内容检测拾取；亮/暗各一套）
+const LEVEL_CLASSES = [
+  "bg-[#ebedf0] dark:bg-[#161b22]", // 0：空档
+  "bg-[#9be9a8] dark:bg-[#0e4429]",
+  "bg-[#40c463] dark:bg-[#006d32]",
+  "bg-[#30a14e] dark:bg-[#26a641]",
+  "bg-[#216e39] dark:bg-[#39d353]",
+];
+
+// 今日格描边：用工作蓝色与绿色色阶区分
+const TODAY_OUTLINE = "outline-2 outline-[#396cd8] outline-offset-1";
+
+function cellClass(cell: HeatCell): string {
+  const base = LEVEL_CLASSES[cell.date === null ? 0 : heatLevel(cell.count)];
+  return cell.date === todayStr() ? `${base} ${TODAY_OUTLINE}` : base;
 }
+
+// 左侧行标签：仅标周一/周三/周五（GitHub 风格），行序 = 周一..周日
+const WDAY_LABELS = ["一", "", "三", "", "五", "", ""];
+
+// 顶部月份标签：当列首个真实日期的月份与前一列不同时标注（GitHub 风格）
+function monthLabel(ci: number): string {
+  const first = heatmapColumns.value[ci]?.find((c) => c.date !== null);
+  if (!first?.date) return "";
+  const month = Number(first.date.slice(5, 7));
+  const prevFirst = heatmapColumns.value[ci - 1]?.find((c) => c.date !== null);
+  if (prevFirst?.date && Number(prevFirst.date.slice(5, 7)) === month) return "";
+  return `${month}月`;
+}
+
+// 相位 → 时钟颜色（静态字面量；工作蓝 / 休息绿 / 空闲前景色）
+const CLOCK_COLOR: Record<PhaseStatus["phase"], string> = {
+  idle: "text-foreground",
+  work: "text-[#396cd8]",
+  break: "text-[#249b73]",
+};
+
+// 入场动画（tw-animate-css）：12px 淡入上浮，尊重系统"减少动态"设置
+const RISE =
+  "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:fill-mode-both motion-safe:duration-600";
 
 // 休息结束回到工作 = 完成一个番茄钟（stats.ts 30 天滚动窗口持久化）
 function completeCycle() {
@@ -168,196 +236,128 @@ async function togglePause() {
 </script>
 
 <template>
-  <main class="container">
-    <h1>eye-guard</h1>
-    <div class="clock" :class="[phase, { paused }]">
-      <AnimatedClock :value="remaining" />
-    </div>
-    <p class="meta">
-      <span v-if="phase === 'work'">工作</span>
-      <span v-else-if="phase === 'break'">{{ longBreak ? "长休息" : "休息" }}</span>
-      <span v-else>已停止</span>
-      <span v-if="running"> · 第 {{ cycle }} 轮</span>
-      <span v-if="paused"> · 已暂停</span>
-      <span v-if="today > 0"> · 今日 {{ today }} 轮</span>
-    </p>
-    <div class="week">
-      <div class="bars">
-        <div
-          v-for="d in week"
-          :key="d.date"
-          class="bar"
-          :class="{ 'bar-today': d.date === todayStr() }"
-          :style="{ height: barHeight(d.count) }"
-          :title="`${d.date}：${d.count} 轮`"
-        ></div>
+  <main class="flex min-h-screen flex-col text-center">
+    <header class="flex items-baseline justify-between px-8 pt-5" :class="RISE">
+      <h1 class="text-xl font-semibold">eye-guard</h1>
+      <span class="text-sm text-muted-foreground">今日 {{ today }} 轮</span>
+    </header>
+
+    <section class="flex flex-1 flex-col items-center justify-center" :class="[RISE, 'motion-safe:[animation-delay:120ms]']">
+      <div
+        class="text-[5.5rem] leading-[1.15] font-semibold tabular-nums transition-colors duration-600"
+        :class="[CLOCK_COLOR[phase], { 'opacity-45': paused }]"
+      >
+        <AnimatedClock :value="remaining" />
       </div>
-      <div class="bar-labels">
-        <span v-for="d in week" :key="d.date">{{ barLabel(d.date) }}</span>
+      <p class="mb-6 text-muted-foreground">
+        <span v-if="phase === 'work'">工作</span>
+        <span v-else-if="phase === 'break'">{{ longBreak ? "长休息" : "休息" }}</span>
+        <span v-else>已停止</span>
+        <span v-if="running"> · 第 {{ cycle }} 轮</span>
+        <span v-if="paused"> · 已暂停</span>
+      </p>
+
+      <!-- 近 26 周热力图（GitHub 风格）：2×2 网格 = 角空 / 月份行 / 星期列 / 格子区 -->
+      <TooltipProvider :delay-duration="100">
+        <div class="flex max-w-full flex-col items-center gap-[0.4rem] overflow-x-auto">
+          <div class="grid grid-cols-[auto_auto] pr-[14px]">
+            <div aria-hidden="true" class="col-start-1 row-start-1"></div>
+            <div
+              aria-hidden="true"
+              class="col-start-2 row-start-1 flex h-4 items-end gap-[3px] text-[0.65rem] text-muted-foreground"
+            >
+              <span v-for="(_, ci) in heatmapColumns" :key="ci" class="w-3.5 shrink-0 text-left whitespace-nowrap">{{
+                monthLabel(ci)
+              }}</span>
+            </div>
+            <div
+              aria-hidden="true"
+              class="col-start-1 row-start-2 flex flex-col gap-[3px] pr-1 text-[0.65rem] text-muted-foreground"
+            >
+              <span v-for="(w, wi) in WDAY_LABELS" :key="wi" class="h-3.5 leading-[14px]">{{ w }}</span>
+            </div>
+            <div class="col-start-2 row-start-2 flex gap-[3px]">
+              <div v-for="(col, ci) in heatmapColumns" :key="ci" class="flex flex-col gap-[3px]">
+                <template v-for="cell in col" :key="cell.key">
+                  <!-- 补零空位格无数据，不给 tooltip -->
+                  <span v-if="cell.date === null" class="size-3.5 rounded-[3px]" :class="LEVEL_CLASSES[0]"></span>
+                  <Tooltip v-else>
+                    <TooltipTrigger as-child>
+                      <span
+                        class="size-3.5 rounded-[3px] hover:ring-2 hover:ring-foreground/25"
+                        :class="cellClass(cell)"
+                      ></span>
+                    </TooltipTrigger>
+                    <TooltipContent class="flex items-center gap-1.5 px-2 py-1">
+                      <i class="size-2 rounded-full" :class="LEVEL_CLASSES[heatLevel(cell.count)]"></i>
+                      {{ cell.date }}：{{ cell.count }} 轮
+                    </TooltipContent>
+                  </Tooltip>
+                </template>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center justify-end gap-[3px] self-end text-[0.7rem] text-muted-foreground">
+            <span>少</span>
+            <i v-for="lv in 5" :key="lv" class="size-3.5 rounded-[3px]" :class="LEVEL_CLASSES[lv - 1]"></i>
+            <span>多</span>
+          </div>
+        </div>
+      </TooltipProvider>
+    </section>
+
+    <section class="border-t border-border bg-muted/40 px-8 pt-4 pb-5" :class="[RISE, 'motion-safe:[animation-delay:240ms]']">
+      <div class="flex items-center justify-center gap-4">
+        <Label class="gap-1.5">
+          工作
+          <Input v-model.number="workMin" type="number" min="1" :disabled="running" class="w-20 text-center" />
+          分钟
+        </Label>
+        <Label class="gap-1.5">
+          休息
+          <Input v-model.number="breakMin" type="number" min="1" :disabled="running" class="w-20 text-center" />
+          分钟
+        </Label>
       </div>
-    </div>
-    <div class="row">
-      <label>
-        工作 <input v-model.number="workMin" type="number" min="1" :disabled="running" /> 分钟
-      </label>
-      <label>
-        休息 <input v-model.number="breakMin" type="number" min="1" :disabled="running" /> 分钟
-      </label>
-    </div>
-    <div class="row">
-      <label>
-        <input v-model="longBreakEnabled" type="checkbox" :disabled="running" /> 长休息
-      </label>
-      <label>
-        每 <input v-model.number="cyclesPerLongBreak" type="number" min="1" :disabled="running || !longBreakEnabled" /> 轮
-      </label>
-      <label>
-        时长 <input v-model.number="longBreakMin" type="number" min="1" :disabled="running || !longBreakEnabled" /> 分钟
-      </label>
-    </div>
-    <div class="row">
-      <button :disabled="running" @click="start">开始</button>
-      <button :disabled="!running" @click="stop">停止</button>
-      <button :disabled="phase !== 'work'" @click="togglePause">{{ paused ? "继续" : "暂停" }}</button>
-      <button :disabled="phase === 'break'" @click="startNow">立即执行</button>
-    </div>
-    <p v-if="error" class="error">{{ error }}</p>
+      <div class="mt-2 flex items-center justify-center gap-4">
+        <Label for="long-break-enabled" class="gap-1.5">
+          <Switch id="long-break-enabled" v-model="longBreakEnabled" :disabled="running" />
+          长休息
+        </Label>
+        <Label class="gap-1.5">
+          每
+          <Input
+            v-model.number="cyclesPerLongBreak"
+            type="number"
+            min="1"
+            :disabled="running || !longBreakEnabled"
+            class="w-16 text-center"
+          />
+          轮
+        </Label>
+        <Label class="gap-1.5">
+          时长
+          <Input
+            v-model.number="longBreakMin"
+            type="number"
+            min="1"
+            :disabled="running || !longBreakEnabled"
+            class="w-16 text-center"
+          />
+          分钟
+        </Label>
+      </div>
+      <div class="mt-4 flex items-center justify-center gap-3">
+        <Button size="lg" :disabled="running" @click="start">开始</Button>
+        <Button variant="outline" :disabled="!running" @click="stop">停止</Button>
+        <Button variant="outline" :disabled="phase !== 'work'" @click="togglePause">
+          {{ paused ? "继续" : "暂停" }}
+        </Button>
+        <Button variant="outline" :disabled="phase === 'break'" @click="startNow">立即执行</Button>
+      </div>
+      <Alert v-if="error" variant="destructive" class="mx-auto mt-3 max-w-xl">
+        <AlertDescription>{{ error }}</AlertDescription>
+      </Alert>
+    </section>
   </main>
 </template>
-
-<style scoped>
-.clock {
-  font-size: 4rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  margin: 0.5rem 0;
-  transition: color 0.6s ease;
-}
-
-.clock.work {
-  color: #396cd8;
-}
-
-.clock.break {
-  color: #249b73;
-}
-
-.clock.paused {
-  opacity: 0.45;
-}
-
-.meta {
-  margin: 0 0 1rem;
-  color: #888;
-}
-
-.week {
-  margin: 0 auto 1.25rem;
-  width: min(18rem, 80vw);
-}
-
-.bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.4rem;
-  height: 3.5rem;
-}
-
-.bar {
-  flex: 1;
-  min-height: 2px;
-  border-radius: 3px 3px 1px 1px;
-  background: #396cd8;
-  opacity: 0.5;
-  transition: height 0.4s ease;
-}
-
-.bar-today {
-  background: #249b73;
-  opacity: 0.85;
-}
-
-.bar-labels {
-  display: flex;
-  gap: 0.4rem;
-  margin-top: 0.25rem;
-}
-
-.bar-labels span {
-  flex: 1;
-  text-align: center;
-  font-size: 0.7rem;
-  color: #888;
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.row + .row {
-  justify-content: center;
-}
-
-label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-input {
-  width: 4.5em;
-  text-align: center;
-}
-
-input[type="checkbox"] {
-  width: auto;
-  padding: 0.1em;
-  border: none;
-  box-shadow: none;
-  accent-color: #249b73;
-}
-
-.error {
-  color: #e5484d;
-  margin-top: 1rem;
-}
-
-/* 入场：标题 → 时钟 → 状态 → 表单 依次淡入上浮（尊重“减少动态”） */
-@media (prefers-reduced-motion: no-preference) {
-  .container > * {
-    animation: panel-rise 0.6s ease-out both;
-  }
-
-  .container > h1 {
-    animation-delay: 0s;
-  }
-
-  .container > .clock {
-    animation-delay: 0.12s;
-  }
-
-  .container > .meta {
-    animation-delay: 0.24s;
-  }
-
-  .container > .row {
-    animation-delay: 0.36s;
-  }
-}
-
-@keyframes panel-rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-</style>

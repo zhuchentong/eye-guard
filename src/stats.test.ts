@@ -7,6 +7,7 @@ import {
   saveStats,
   todayCount,
   todayStr,
+  WINDOW_DAYS,
 } from "./stats";
 
 beforeEach(() => {
@@ -80,16 +81,17 @@ describe("loadStats / saveStats", () => {
     expect(loadStats()).toEqual(stats);
   });
 
-  it("saveStats 裁剪到 30 天窗口（保留最近）", () => {
-    const stats = Array.from({ length: 40 }, (_, i) => ({
-      date: dateStr(new Date(Date.now() - (39 - i) * 86_400_000)),
+  it("saveStats 裁剪到滚动窗口（保留最近）", () => {
+    const total = WINDOW_DAYS + 29;
+    const stats = Array.from({ length: total }, (_, i) => ({
+      date: dateStr(new Date(Date.now() - (total - 1 - i) * 86_400_000)),
       count: i,
     }));
     saveStats(stats);
     const loaded = loadStats();
-    expect(loaded).toHaveLength(30);
-    expect(loaded[0].count).toBe(10);
-    expect(loaded[29].count).toBe(39);
+    expect(loaded).toHaveLength(WINDOW_DAYS);
+    expect(loaded[0].count).toBe(29);
+    expect(loaded[WINDOW_DAYS - 1].count).toBe(total - 1);
   });
 
   it("迁移旧 eye-guard.todayStats 键", () => {

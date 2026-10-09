@@ -1,0 +1,134 @@
+/* shadcn-vue + Tailwind v4 主题基建（官方 manual installation 模板裁剪版）。
+   深色模式跟随系统：不定义 @custom-variant dark（v4 默认 dark: 即 media query），
+   变量覆盖同样写进 @media (prefers-color-scheme: dark)，与 App.vue 历史行为一致。
+   品牌色直接用十六进制（工作蓝 #396cd8 / 休息绿 #249b73），避免色彩空间换算误差。 */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+:root {
+  --background: #f6f6f6;
+  --foreground: #0f0f0f;
+  --card: #ffffff;
+  --card-foreground: #0f0f0f;
+  --popover: #ffffff;
+  --popover-foreground: #0f0f0f;
+  --primary: #249b73;
+  --primary-foreground: #ffffff;
+  --secondary: #e8e8e8;
+  --secondary-foreground: #0f0f0f;
+  --muted: #e8e8e8;
+  --muted-foreground: #6b6b6b;
+  --accent: #e8e8e8;
+  --accent-foreground: #0f0f0f;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --border: #d9d9d9;
+  --input: #d9d9d9;
+  --ring: #249b73;
+  --chart-1: #396cd8;
+  --chart-2: #249b73;
+  --chart-3: #30a14e;
+  --chart-4: #9be9a8;
+  --chart-5: #216e39;
+  --radius: 0.5rem;
+  /* 承接自 App.vue 原 :root 字体栈（经 preflight 的 --default-font-family 生效） */
+  --font-sans: Inter, Avenir, Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #2f2f2f;
+    --foreground: #f6f6f6;
+    --card: #262626;
+    --card-foreground: #f6f6f6;
+    --popover: #262626;
+    --popover-foreground: #f6f6f6;
+    --primary: #2bb285;
+    --primary-foreground: #ffffff;
+    --secondary: #3d3d3d;
+    --secondary-foreground: #f6f6f6;
+    --muted: #3d3d3d;
+    --muted-foreground: #a3a3a3;
+    --accent: #3d3d3d;
+    --accent-foreground: #f6f6f6;
+    --destructive: #e5484d;
+    --destructive-foreground: #ffffff;
+    --border: #4d4d4d;
+    --input: #4d4d4d;
+    --ring: #2bb285;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+/* 锁屏循环动画（呼吸光晕 / 休息将尽脉冲），tailwind v4 CSS-first 定义 */
+@theme {
+  --animate-breathe: lock-breathe 8s ease-in-out infinite alternate;
+  --animate-pulse-soft: lock-pulse 1s ease-in-out infinite;
+
+  @keyframes lock-breathe {
+    from {
+      opacity: 0.35;
+      transform: scale(1);
+    }
+
+    to {
+      opacity: 0.9;
+      transform: scale(1.08);
+    }
+  }
+
+  @keyframes lock-pulse {
+    50% {
+      transform: scale(1.02);
+      opacity: 0.85;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  /* 承接自 App.vue 原 :root 的文字渲染设定（preflight 不含） */
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}

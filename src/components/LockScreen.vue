@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { type PhaseStatus } from "../types";
 import AnimatedClock from "./AnimatedClock.vue";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 const remaining = ref(0);
 const error = ref("");
@@ -36,150 +38,51 @@ onMounted(async () => {
 });
 
 onUnmounted(() => unlisten?.());
+
+// 入场动画（tw-animate-css）：12px 淡入上浮，尊重系统"减少动态"设置
+const RISE =
+  "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:fill-mode-both motion-safe:duration-600";
 </script>
 
 <template>
-  <div class="lock">
-    <div class="glow" aria-hidden="true"></div>
-    <h1>休息一下 · 远离屏幕放松眼睛</h1>
-    <div class="clock-wrap" :class="{ ending }">
-      <AnimatedClock :value="remaining" class="clock" />
+  <div class="fixed inset-0 flex flex-col items-center justify-center gap-6 overflow-hidden bg-black text-white select-none">
+    <!-- 时钟后方的呼吸光晕，营造休息氛围 -->
+    <div
+      aria-hidden="true"
+      class="pointer-events-none absolute size-[62vmin] rounded-full bg-[radial-gradient(circle,rgba(36,155,115,0.16),transparent_65%)] blur-[12px] motion-safe:animate-breathe"
+    ></div>
+
+    <h1 :class="RISE" class="text-[2.2rem] font-medium tracking-[0.1em]">休息一下 · 远离屏幕放松眼睛</h1>
+
+    <div :class="[RISE, 'motion-safe:[animation-delay:150ms]']">
+      <!-- 脉冲放在内层，避免与入场动画的 animation 属性相互覆盖 -->
+      <div :class="{ 'motion-safe:animate-pulse-soft': ending }">
+        <AnimatedClock class="text-[8rem] font-semibold" :value="remaining" />
+      </div>
     </div>
-    <p v-if="lockMessage" class="message">{{ lockMessage }}</p>
-    <p class="hint">倒计时结束后将自动开始下一轮工作</p>
-    <button class="skip" @click="skip">跳过休息</button>
-    <p v-if="error" class="error">{{ error }}</p>
+
+    <p
+      v-if="lockMessage"
+      :class="[RISE, 'motion-safe:[animation-delay:300ms]']"
+      class="m-0 text-[1.4rem] text-neutral-300"
+    >
+      {{ lockMessage }}
+    </p>
+    <p :class="[RISE, 'motion-safe:[animation-delay:300ms]']" class="m-0 text-neutral-400">
+      倒计时结束后将自动开始下一轮工作
+    </p>
+
+    <Button
+      variant="outline"
+      :class="[RISE, 'motion-safe:[animation-delay:450ms]']"
+      class="mt-8 border-neutral-700 bg-transparent text-neutral-400 hover:border-neutral-500 hover:bg-transparent hover:text-neutral-300 dark:bg-transparent dark:text-neutral-400 dark:border-neutral-700 dark:hover:bg-neutral-900 dark:hover:text-neutral-300"
+      @click="skip"
+    >
+      跳过休息
+    </Button>
+
+    <Alert v-if="error" variant="destructive" class="w-auto border-destructive/40 bg-black/60">
+      <AlertDescription>{{ error }}</AlertDescription>
+    </Alert>
   </div>
 </template>
-
-<style scoped>
-.lock {
-  position: fixed;
-  inset: 0;
-  background: #000;
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.5rem;
-  user-select: none;
-  overflow: hidden;
-}
-
-/* 时钟后方的呼吸光晕，营造休息氛围 */
-.glow {
-  position: absolute;
-  width: 62vmin;
-  height: 62vmin;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(36, 155, 115, 0.16), transparent 65%);
-  filter: blur(12px);
-  pointer-events: none;
-}
-
-h1 {
-  margin: 0;
-  font-size: 2.2rem;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-}
-
-.clock {
-  font-size: 8rem;
-  font-weight: 600;
-}
-
-.message {
-  font-size: 1.4rem;
-  color: #ddd;
-  margin: 0;
-}
-
-.hint {
-  color: #9a9a9a;
-  margin: 0;
-}
-
-.skip {
-  margin-top: 2rem;
-  background: transparent;
-  color: #777;
-  border-color: #444;
-  box-shadow: none;
-}
-
-.skip:hover {
-  border-color: #777;
-}
-
-.error {
-  color: #e5484d;
-  margin: 0;
-}
-
-/* —— 动效（平静舒缓；尊重系统“减少动态”设置）—— */
-@media (prefers-reduced-motion: no-preference) {
-  /* 入场：标题 → 时钟 → 提示 → 按钮 依次淡入上浮 */
-  .lock > * {
-    animation: lock-rise 0.6s ease-out both;
-  }
-
-  .lock > h1 {
-    animation-delay: 0s;
-  }
-
-  .lock > .clock-wrap {
-    animation-delay: 0.15s;
-  }
-
-  .lock > .message,
-  .lock > .hint {
-    animation-delay: 0.3s;
-  }
-
-  .lock > .skip {
-    animation-delay: 0.45s;
-  }
-
-  .glow {
-    animation: lock-breathe 8s ease-in-out infinite alternate;
-  }
-
-  /* 剩余 ≤3s：轻微呼吸脉冲提示休息即将结束 */
-  .ending {
-    animation: lock-pulse 1s ease-in-out infinite;
-  }
-}
-
-@keyframes lock-rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes lock-breathe {
-  from {
-    opacity: 0.35;
-    transform: scale(1);
-  }
-
-  to {
-    opacity: 0.9;
-    transform: scale(1.08);
-  }
-}
-
-@keyframes lock-pulse {
-  50% {
-    transform: scale(1.02);
-    opacity: 0.85;
-  }
-}
-</style>

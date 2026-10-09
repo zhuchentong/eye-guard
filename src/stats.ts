@@ -1,4 +1,4 @@
-// 今日/历史完成轮数统计：localStorage 30 天滚动窗口。
+// 今日/历史完成轮数统计：localStorage 53 周滚动窗口（与全年热力图展示范围一致）。
 // 旧版单日键 eye-guard.todayStats 首次读取时自动迁移。
 
 export interface DayStat {
@@ -8,7 +8,10 @@ export interface DayStat {
 
 const STATS_KEY = "eye-guard.stats";
 const LEGACY_KEY = "eye-guard.todayStats";
-const WINDOW_DAYS = 30;
+/** 存储滚动窗口天数：53 周 = 371 天。 */
+export const WINDOW_DAYS = 371;
+/** 热力图显示窗口天数：近 26 周 = 182 天（格子更大更易读；存储仍保留 53 周）。 */
+export const DISPLAY_DAYS = 26 * 7;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function dateStr(d: Date): string {
