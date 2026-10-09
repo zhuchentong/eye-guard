@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -132,14 +132,43 @@ fn tray_title(status: &PhaseStatus) -> String {
     }
 }
 
-/// 同步托盘标题（Linux AppIndicator 支持 title；Windows 不支持则静默忽略）。
+/// 托盘图标相位缓存：TRAY_PHASE_DEFAULT / TRAY_PHASE_BREAK，0 表示尚未同步过。
+static TRAY_LAST_PHASE: AtomicU8 = AtomicU8::new(0);
+const TRAY_PHASE_DEFAULT: u8 = 1;
+const TRAY_PHASE_BREAK: u8 = 2;
+
+const TRAY_BREAK_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-break.png");
+
+/// 相位 -> 托盘图标代号（纯函数，便于单测）：idle/work 用应用默认图标，break 用蓝色闭眼。
+fn tray_phase_code(phase: &str) -> u8 {
+    if phase == "break" {
+        TRAY_PHASE_BREAK
+    } else {
+        TRAY_PHASE_DEFAULT
+    }
+}
+
+/// 同步托盘标题与相位图标（Linux AppIndicator 支持 title；Windows 不支持则静默忽略）。
 /// GTK 调用须经主线程，经 run_on_main_thread 派发；无托盘环境（mock runtime）跳过。
+/// 图标仅在相位变化时重设（TRAY_LAST_PHASE 缓存），避免每 tick 都走一次 GTK。
 fn update_tray_status<R: tauri::Runtime>(app: &AppHandle<R>, status: &PhaseStatus) {
     let title = tray_title(status);
+    let code = tray_phase_code(&status.phase);
     let app2 = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(tray) = app2.tray_by_id("main") {
             let _ = tray.set_title(Some(title));
+            if TRAY_LAST_PHASE.swap(code, Ordering::Relaxed) != code {
+                let icon = if code == TRAY_PHASE_BREAK {
+                    tauri::image::Image::from_bytes(TRAY_BREAK_ICON_BYTES)
+                        .expect("内嵌 tray-break.png 必须可解码")
+                } else {
+                    app2.default_window_icon()
+                        .expect("应用默认图标必须存在")
+                        .clone()
+                };
+                let _ = tray.set_icon(Some(icon));
+            }
         }
     });
 }
@@ -859,5 +888,12 @@ mod tests {
         assert_eq!(tray_title(&mk("break", 299, false, false)), "休息 04:59");
         assert_eq!(tray_title(&mk("break", 900, true, false)), "长休息 15:00");
         assert_eq!(tray_title(&mk("idle", 0, false, false)), "");
+    }
+
+    #[test]
+    fn tray_phase_code_distinguishes_break() {
+        assert_eq!(tray_phase_code("idle"), TRAY_PHASE_DEFAULT);
+        assert_eq!(tray_phase_code("work"), TRAY_PHASE_DEFAULT);
+        assert_eq!(tray_phase_code("break"), TRAY_PHASE_BREAK);
     }
 }

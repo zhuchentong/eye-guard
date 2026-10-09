@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- eye-guard 应用图标：品牌绿圆角方底 + 睁眼。源文件，勿直接改 src-tauri/icons/（由 pnpm tauri icon 再生成） -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2bb285"/>
+      <stop offset="1" stop-color="#1e7d5e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="216" fill="url(#bg)"/>
+  <path d="M 132 512 Q 512 -32 892 512 Q 512 1056 132 512 Z" fill="#ffffff"/>
+  <circle cx="512" cy="512" r="170" fill="#1c7a5b"/>
+  <circle cx="512" cy="512" r="86" fill="#0f3826"/>
+  <circle cx="566" cy="446" r="44" fill="#ffffff"/>
+</svg>

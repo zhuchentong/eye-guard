@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- 休息态托盘图标：蓝色圆角方底 + 闭眼。源文件，生成 src-tauri/icons/tray-break.png 用 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#2458c8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="216" fill="url(#bg)"/>
+  <path d="M 132 460 Q 512 780 892 460" fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round"/>
+  <line x1="262" y1="608" x2="196" y2="704" stroke="#ffffff" stroke-width="56" stroke-linecap="round"/>
+  <line x1="512" y1="622" x2="512" y2="748" stroke="#ffffff" stroke-width="56" stroke-linecap="round"/>
+  <line x1="762" y1="608" x2="828" y2="704" stroke="#ffffff" stroke-width="56" stroke-linecap="round"/>
+</svg>
