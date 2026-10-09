@@ -6,6 +6,11 @@
 
 基于 **Tauri v2 + Vue 3 + TypeScript** 构建，托盘常驻，支持多显示器。
 
+<p align="center">
+  <img src="images/screenshot-main.png" alt="主界面：计时、设置与 26 周贡献热力图" width="400"><br>
+  <img src="images/screenshot-lock.png" alt="休息锁屏遮罩：全屏倒计时，跳过按钮居中" width="640">
+</p>
+
 ## 功能
 
 - 番茄钟循环：工作 → 休息 → 下一轮，自动循环；每 N 轮可进入一次长休息（可关闭）；工作相位可暂停/继续
@@ -14,7 +19,8 @@
 - 托盘常驻：显示/隐藏窗口、立即休息、开机自启、退出；托盘标题实时显示剩余时间（如「工作 24:59」；GNOME 的 AppIndicator 扩展可能不渲染标题）；主窗口关窗即隐藏到托盘
 - 单实例：二次启动唤出已有实例；`eye-guard --break` 可立即触发休息
 - 全局快捷键 `Alt+Shift+B`：立即休息
-- 今日完成轮数统计与近 7 天 mini 条形图（前端本地持久化，30 天滚动窗口，跨日自动归档）
+- 今日完成轮数统计与 GitHub 风格贡献热力图（近 26 周，53 周滚动窗口，前端本地持久化，跨日自动归档，悬停格子查看日期与轮数）
+- 锁屏文案可自定义：设置 localStorage 键 `eye-guard.lockMessage` 即在锁屏遮罩显示自定义提示（进阶用法）
 
 ## 平台说明
 
@@ -61,6 +67,6 @@ Linux 构建依赖：`libwebkit2gtk-4.1-dev`、`libgtk-3-dev`、`libgtk-layer-sh
 
 ## 架构速览
 
-- **前端** `src/`：Vue 3 SFC。`App.vue` 按窗口 label 分发：`main` → 计时面板，`lock-*` → 锁屏。
+- **前端** `src/`：Vue 3 SFC，样式为 Tailwind v4 + shadcn-vue（`src/components/ui/`）。`App.vue` 按窗口 label 分发：`main` → 计时面板，`lock-*` → 锁屏。
 - **后端** `src-tauri/src/lib.rs`：计时器状态机与 Rust 工作线程（1 s 单调时钟 tick），托盘/遮罩窗口管理，命令经 `#[tauri::command]` + `generate_handler!` 注册。
 - **事件**：后端每秒发 `timer-tick`，相位变化发 `phase-changed`；前端 `listen` 渲染。
