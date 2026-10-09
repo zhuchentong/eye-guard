@@ -11,6 +11,26 @@
   <img src="images/screenshot-lock.png" alt="休息锁屏遮罩：全屏倒计时，跳过按钮居中" width="640">
 </p>
 
+## 安装
+
+Linux x86_64，一行命令。脚本按发行版自动选择：有 `apt` 装 deb、有 `dnf`/`zypper` 装 rpm（自动补齐运行时依赖，需 root）；其他环境走 **AppImage 用户级安装**（免 root，自动创建菜单项与「立即休息」右键动作，无 FUSE 时自动解包落地）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zhuchentong/eye-guard/master/scripts/install.sh | bash
+```
+
+网络受限时加镜像前缀（脚本内产物下载同走该镜像，格式为 `<镜像>/https://github.com/...`）：
+
+```sh
+curl -fsSL <镜像>/https://raw.githubusercontent.com/zhuchentong/eye-guard/master/scripts/install.sh | GH_MIRROR=<镜像> bash
+```
+
+卸载：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zhuchentong/eye-guard/master/scripts/install.sh | bash -s -- --uninstall
+```
+
 ## 功能
 
 - 番茄钟循环：工作 → 休息 → 下一轮，自动循环；每 N 轮可进入一次长休息（可关闭）；工作相位可暂停/继续
