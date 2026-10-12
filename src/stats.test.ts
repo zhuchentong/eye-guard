@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  clearAllStats,
   dateStr,
   lastNDays,
   loadStats,
@@ -114,6 +115,19 @@ describe("loadStats / saveStats", () => {
       "eye-guard.stats",
       JSON.stringify([{ date: 123, count: "x" }]),
     );
+    expect(loadStats()).toEqual([]);
+  });
+
+  it("clearAllStats 同时清除主键与 legacy 键（清除后不再复活）", () => {
+    // legacy 单日键先存在：loadStats 迁移 → saveStats 落主键
+    localStorage.setItem(
+      "eye-guard.todayStats",
+      JSON.stringify({ date: todayStr(), count: 7 }),
+    );
+    saveStats(loadStats());
+    clearAllStats();
+    expect(localStorage.getItem("eye-guard.stats")).toBeNull();
+    expect(localStorage.getItem("eye-guard.todayStats")).toBeNull();
     expect(loadStats()).toEqual([]);
   });
 });

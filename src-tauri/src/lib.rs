@@ -44,6 +44,8 @@ struct TimerConfig {
 
 struct TimerState {
     running: Arc<AtomicBool>,
+    /// 休息预告通知开关（worker 每 tick 读取，改动即时生效）
+    notify_before_break: Arc<AtomicBool>,
     handle: Mutex<Option<JoinHandle<()>>>,
     status: Mutex<PhaseStatus>,
     config: Mutex<TimerConfig>,
@@ -53,6 +55,7 @@ impl Default for TimerState {
     fn default() -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
+            notify_before_break: Arc::new(AtomicBool::new(true)),
             handle: Mutex::new(None),
             status: Mutex::new(PhaseStatus {
                 running: false,
@@ -269,7 +272,10 @@ fn run_cycles<R: tauri::Runtime>(
                     let _ = app.emit("phase-changed", status.clone());
                 }
             } else if (phase_started && config.work_secs <= 30) || remaining == 30 {
-                send_break_notice(&app);
+                // 预告通知受设置开关控制：每 tick 读共享标志，改动即时生效
+                if state.notify_before_break.load(Ordering::Relaxed) {
+                    send_break_notice(&app);
+                }
             }
         } else if phase == "break" && remaining == 0 {
             finish_break(&state, &app);
@@ -603,6 +609,50 @@ fn resume_pomodoro<R: tauri::Runtime>(
     Ok(())
 }
 
+/// 托盘菜单项句柄：设置页与托盘双向同步开机自启勾选态。
+struct TrayState<R: tauri::Runtime> {
+    autostart_item: Mutex<Option<CheckMenuItem<R>>>,
+}
+
+/// 休息预告通知开关：写共享标志，worker 每 tick 读取，改动即时生效。
+#[tauri::command]
+fn set_notify_before_break(enabled: bool, state: State<'_, TimerState>) {
+    state.notify_before_break.store(enabled, Ordering::Relaxed);
+}
+
+/// 开机自启状态读取（设置页挂载时同步勾选态）。
+#[tauri::command]
+fn get_autostart<R: tauri::Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+/// 主线程更新托盘勾选态（GTK 菜单操作须在主线程，与 update_tray_status 同模式）。
+fn sync_autostart_item<R: tauri::Runtime>(app: &AppHandle<R>, tray: &TrayState<R>, enabled: bool) {
+    if let Some(item) = tray.autostart_item.lock().clone() {
+        let _ = app.run_on_main_thread(move || {
+            let _ = item.set_checked(enabled);
+        });
+    }
+}
+
+/// 设置开机自启：应用后同步托盘勾选并广播（设置页监听保持一致）。
+#[tauri::command]
+fn set_autostart<R: tauri::Runtime>(
+    enabled: bool,
+    app: AppHandle<R>,
+    tray: State<'_, TrayState<R>>,
+) -> Result<bool, String> {
+    let launcher = app.autolaunch();
+    if enabled {
+        launcher.enable().map_err(|e| e.to_string())?;
+    } else {
+        launcher.disable().map_err(|e| e.to_string())?;
+    }
+    sync_autostart_item(&app, &tray, enabled);
+    let _ = app.emit("autostart-changed", enabled);
+    Ok(enabled)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -643,7 +693,10 @@ pub fn run() {
             end_break_early,
             start_break_now,
             pause_pomodoro,
-            resume_pomodoro
+            resume_pomodoro,
+            set_notify_before_break,
+            get_autostart,
+            set_autostart
         ])
         .setup(|app| {
             // 注册失败不致命：Wayland 合成器多不支持 X11 全局抓取（见 break_shortcut 注释）
@@ -666,6 +719,10 @@ pub fn run() {
                 autostart_checked,
                 None::<&str>,
             )?;
+            // 句柄入库：设置页切换自启时经 sync_autostart_item 更新勾选态
+            app.manage(TrayState {
+                autostart_item: Mutex::new(Some(autostart_item.clone())),
+            });
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu =
                 Menu::with_items(app, &[&show_item, &break_item, &autostart_item, &quit_item])?;
@@ -688,6 +745,8 @@ pub fn run() {
                         } {
                             eprintln!("[eg] autostart toggle failed: {e}");
                         }
+                        // 广播给设置页，保持勾选一致
+                        let _ = app.emit("autostart-changed", want_enable);
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -786,6 +845,26 @@ mod tests {
             end_break_early(state, app.clone()).unwrap_err(),
             "not in break"
         );
+    }
+
+    /// 休息预告通知开关：默认开启，command 切换共享标志（worker 逐 tick 读取）。
+    #[test]
+    fn notify_flag_defaults_on_and_set_command_toggles() {
+        let (app, _app) = app_with_state();
+        assert!(app
+            .state::<TimerState>()
+            .notify_before_break
+            .load(Ordering::Relaxed));
+        set_notify_before_break(false, app.state::<TimerState>());
+        assert!(!app
+            .state::<TimerState>()
+            .notify_before_break
+            .load(Ordering::Relaxed));
+        set_notify_before_break(true, app.state::<TimerState>());
+        assert!(app
+            .state::<TimerState>()
+            .notify_before_break
+            .load(Ordering::Relaxed));
     }
 
     /// 关键并发路径：空闲时「立即休息」必须 spawn 工作线程（遮罩倒计时不得冻结），

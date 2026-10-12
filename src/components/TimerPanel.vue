@@ -1,12 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { formatProgress } from "../update-progress";
 import { type PhaseStatus } from "../types";
 import {
   DISPLAY_DAYS,
@@ -18,56 +13,30 @@ import {
   todayStr,
   type DayStat,
 } from "../stats";
+import {
+  breakMin,
+  cyclesPerLongBreak,
+  initSettings,
+  longBreakEnabled,
+  longBreakMin,
+  notifyBeforeBreak,
+  workMin,
+} from "../settings";
 import AnimatedClock from "./AnimatedClock.vue";
+import SettingsPanel from "./SettingsPanel.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-const WORK_KEY = "eye-guard.workMin";
-const BREAK_KEY = "eye-guard.breakMin";
-const LONG_BREAK_KEY = "eye-guard.longBreakMin";
-const CYCLES_KEY = "eye-guard.cyclesPerLongBreak";
+// 主窗口双视图：计时 / 设置（齿轮进入，设置页返回按钮退出）
+const view = ref<"timer" | "settings">("timer");
 
 const phase = ref<PhaseStatus["phase"]>("idle");
 const remaining = ref(0);
 const cycle = ref(0);
 const longBreak = ref(false);
 const paused = ref(false);
-const workMin = ref(25);
-const breakMin = ref(5);
-const longBreakMin = ref(15);
-const cyclesPerLongBreak = ref(4);
-// 长休息开关：关闭时 cyclesPerLongBreak 以 0 持久化（后端 0 = 禁用）
-const longBreakEnabled = ref(true);
 const error = ref("");
-
-// —— 版本显示与应用内更新（tauri-plugin-updater）——
-// dev（未打包）运行环境没有可安装的产物：检查更新直接降级为打开 Releases 页
-const RELEASES_PAGE_URL = "https://github.com/zhuchentong/eye-guard/releases/latest";
-const appVersion = ref("");
-const latestTag = ref("");
-const updateState = ref<
-  "idle" | "checking" | "latest" | "newer" | "downloading" | "installing" | "error"
->("idle");
-const updateProgress = ref(""); // 下载进度展示文本（百分比 / 已下载字节）
-const updateError = ref("检查失败");
-let pendingUpdate: Update | null = null;
-
-const updateButtonLabel = computed(
-  () =>
-    ({
-      idle: "检查更新",
-      checking: "检查中…",
-      latest: "检查更新",
-      newer: "立即更新",
-      downloading: `下载中 ${updateProgress.value}`,
-      installing: "安装中…",
-      error: "检查更新",
-    })[updateState.value],
-);
 
 const running = computed(() => phase.value !== "idle");
 
@@ -147,10 +116,15 @@ const CLOCK_COLOR: Record<PhaseStatus["phase"], string> = {
 const RISE =
   "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:fill-mode-both motion-safe:duration-600";
 
-// 休息结束回到工作 = 完成一个番茄钟（stats.ts 30 天滚动窗口持久化）
+// 休息结束回到工作 = 完成一个番茄钟（stats.ts 滚动窗口持久化）
 function completeCycle() {
   stats.value = recordCompletedCycle(stats.value);
   saveStats(stats.value);
+}
+
+// 设置页清除统计后同步清空内存视图
+function onStatsCleared() {
+  stats.value = [];
 }
 
 function apply(s: PhaseStatus) {
@@ -165,22 +139,15 @@ function apply(s: PhaseStatus) {
 }
 
 onMounted(async () => {
-  const savedWork = Number(localStorage.getItem(WORK_KEY));
-  const savedBreak = Number(localStorage.getItem(BREAK_KEY));
-  const savedLongBreak = Number(localStorage.getItem(LONG_BREAK_KEY));
-  const savedCycles = Number(localStorage.getItem(CYCLES_KEY));
-  if (Number.isFinite(savedWork) && savedWork >= 1) workMin.value = Math.floor(savedWork);
-  if (Number.isFinite(savedBreak) && savedBreak >= 1) breakMin.value = Math.floor(savedBreak);
-  if (Number.isFinite(savedLongBreak) && savedLongBreak >= 1) longBreakMin.value = Math.floor(savedLongBreak);
-  if (Number.isFinite(savedCycles) && savedCycles >= 1) cyclesPerLongBreak.value = Math.floor(savedCycles);
-  else if (localStorage.getItem(CYCLES_KEY) === "0") longBreakEnabled.value = false; // 上次禁用；输入框保留默认值便于重新启用
-  stats.value = loadStats();
-
+  // 设置状态在 src/settings.ts 模块单例中（与设置页共享）
+  initSettings();
+  // 通知开关落库到后端（worker 逐 tick 读取）
   try {
-    appVersion.value = await getVersion();
+    await invoke("set_notify_before_break", { enabled: notifyBeforeBreak.value });
   } catch {
-    // 取不到时界面显示未知，检查更新会提示失败
+    // 后端不可用时保持本地默认
   }
+  stats.value = loadStats();
 
   unlisteners.push(
     await listen<PhaseStatus>("timer-tick", (e) => apply(e.payload)),
@@ -196,13 +163,6 @@ onMounted(async () => {
 onUnmounted(() => {
   for (const unlisten of unlisteners) unlisten();
   unlisteners = [];
-});
-
-watch(workMin, (v) => localStorage.setItem(WORK_KEY, String(v)));
-watch(breakMin, (v) => localStorage.setItem(BREAK_KEY, String(v)));
-watch(longBreakMin, (v) => localStorage.setItem(LONG_BREAK_KEY, String(v)));
-watch([longBreakEnabled, cyclesPerLongBreak], ([enabled, cycles]) => {
-  localStorage.setItem(CYCLES_KEY, String(enabled ? cycles : 0));
 });
 
 async function start() {
@@ -269,225 +229,119 @@ async function togglePause() {
     error.value = String(e);
   }
 }
-
-// —— 应用内更新：插件统一负责发现/比对/下载/安装 ——
-async function checkUpdate() {
-  if (
-    updateState.value === "checking" ||
-    updateState.value === "downloading" ||
-    updateState.value === "installing"
-  ) {
-    return;
-  }
-  if (import.meta.env.DEV) {
-    openReleasePage(); // 未打包环境无 updater 产物可装，降级为浏览器下载
-    return;
-  }
-  updateState.value = "checking";
-  updateError.value = "检查失败";
-  try {
-    const prev = pendingUpdate;
-    pendingUpdate = await check();
-    // Update 持有 Rust 侧资源，替换前回收旧引用（托盘长驻进程不留泄漏）
-    if (prev && prev !== pendingUpdate) void prev.close();
-    if (pendingUpdate) {
-      latestTag.value = `v${pendingUpdate.version}`;
-      updateState.value = "newer";
-    } else {
-      updateState.value = "latest";
-    }
-  } catch (e) {
-    updateError.value = `检查失败：${e}`;
-    updateState.value = "error";
-  }
-}
-
-// 下载 + 安装 + 自动重启；任一步失败给出错误与手动下载兜底
-async function installUpdate() {
-  if (
-    !pendingUpdate ||
-    updateState.value === "downloading" ||
-    updateState.value === "installing"
-  ) {
-    return;
-  }
-  updateState.value = "downloading";
-  updateProgress.value = "";
-  try {
-    let received = 0;
-    let total: number | null = null;
-    await pendingUpdate.downloadAndInstall((event) => {
-      if (event.event === "Started") {
-        total = event.data.contentLength ?? null;
-      } else if (event.event === "Progress") {
-        received += event.data.chunkLength;
-        updateProgress.value = formatProgress(received, total);
-      } else if (event.event === "Finished") {
-        updateState.value = "installing";
-      }
-    });
-    await relaunch(); // Linux：安装完成后必须重启才会运行新版本
-  } catch (e) {
-    updateError.value = `更新失败：${e}`;
-    updateState.value = "error";
-  }
-}
-
-function openReleasePage() {
-  void openUrl(RELEASES_PAGE_URL);
-}
 </script>
 
 <template>
   <main class="flex min-h-screen flex-col text-center">
-    <header class="flex items-baseline justify-between px-8 pt-5" :class="RISE">
-      <h1 class="text-xl font-semibold">eye-guard</h1>
-      <span class="text-sm text-muted-foreground">今日 {{ today }} 轮</span>
-    </header>
-
-    <section class="flex flex-1 flex-col items-center justify-center" :class="[RISE, 'motion-safe:[animation-delay:120ms]']">
-      <div
-        class="text-[5.5rem] leading-[1.15] font-semibold tabular-nums transition-colors duration-600"
-        :class="[CLOCK_COLOR[phase], { 'opacity-45': paused }]"
-      >
-        <AnimatedClock :value="remaining" />
-      </div>
-      <p class="mb-6 text-muted-foreground">
-        <span v-if="phase === 'work'">工作</span>
-        <span v-else-if="phase === 'break'">{{ longBreak ? "长休息" : "休息" }}</span>
-        <span v-else>已停止</span>
-        <span v-if="running"> · 第 {{ cycle }} 轮</span>
-        <span v-if="paused"> · 已暂停</span>
-      </p>
-
-      <!-- 近 26 周热力图（GitHub 风格）：2×2 网格 = 角空 / 月份行 / 星期列 / 格子区 -->
-      <TooltipProvider :delay-duration="100">
-        <div class="flex max-w-full flex-col items-center gap-[0.4rem] overflow-x-auto">
-          <div class="grid grid-cols-[auto_auto] pr-[14px]">
-            <div aria-hidden="true" class="col-start-1 row-start-1"></div>
-            <div
+    <SettingsPanel
+      v-if="view === 'settings'"
+      :running="running"
+      @back="view = 'timer'"
+      @stats-cleared="onStatsCleared"
+    />
+    <template v-else>
+      <header class="flex items-center justify-between px-8 pt-5" :class="RISE">
+        <h1 class="text-xl font-semibold">eye-guard</h1>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted-foreground">今日 {{ today }} 轮</span>
+          <Button variant="ghost" size="icon" aria-label="打开设置" @click="view = 'settings'">
+            <svg
               aria-hidden="true"
-              class="col-start-2 row-start-1 flex h-4 items-end gap-[3px] text-[0.65rem] text-muted-foreground"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="size-4"
             >
-              <span v-for="(_, ci) in heatmapColumns" :key="ci" class="w-3.5 shrink-0 text-left whitespace-nowrap">{{
-                monthLabel(ci)
-              }}</span>
-            </div>
-            <div
-              aria-hidden="true"
-              class="col-start-1 row-start-2 flex flex-col gap-[3px] pr-1 text-[0.65rem] text-muted-foreground"
-            >
-              <span v-for="(w, wi) in WDAY_LABELS" :key="wi" class="h-3.5 leading-[14px]">{{ w }}</span>
-            </div>
-            <div class="col-start-2 row-start-2 flex gap-[3px]">
-              <div v-for="(col, ci) in heatmapColumns" :key="ci" class="flex flex-col gap-[3px]">
-                <template v-for="cell in col" :key="cell.key">
-                  <!-- 补零空位格无数据，不给 tooltip -->
-                  <span v-if="cell.date === null" class="size-3.5 rounded-[3px]" :class="LEVEL_CLASSES[0]"></span>
-                  <Tooltip v-else>
-                    <TooltipTrigger as-child>
-                      <span
-                        class="size-3.5 rounded-[3px] hover:ring-2 hover:ring-foreground/25"
-                        :class="cellClass(cell)"
-                      ></span>
-                    </TooltipTrigger>
-                    <TooltipContent class="flex items-center gap-1.5 px-2 py-1">
-                      <i class="size-2 rounded-full" :class="LEVEL_CLASSES[heatLevel(cell.count)]"></i>
-                      {{ cell.date }}：{{ cell.count }} 轮
-                    </TooltipContent>
-                  </Tooltip>
-                </template>
+              <path
+                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </Button>
+        </div>
+      </header>
+
+      <section class="flex flex-1 flex-col items-center justify-center" :class="[RISE, 'motion-safe:[animation-delay:120ms]']">
+        <div
+          class="text-[5.5rem] leading-[1.15] font-semibold tabular-nums transition-colors duration-600"
+          :class="[CLOCK_COLOR[phase], { 'opacity-45': paused }]"
+        >
+          <AnimatedClock :value="remaining" />
+        </div>
+        <p class="mb-6 text-muted-foreground">
+          <span v-if="phase === 'work'">工作</span>
+          <span v-else-if="phase === 'break'">{{ longBreak ? "长休息" : "休息" }}</span>
+          <span v-else>已停止</span>
+          <span v-if="running"> · 第 {{ cycle }} 轮</span>
+          <span v-if="paused"> · 已暂停</span>
+        </p>
+
+        <!-- 近 26 周热力图（GitHub 风格）：2×2 网格 = 角空 / 月份行 / 星期列 / 格子区 -->
+        <TooltipProvider :delay-duration="100">
+          <div class="flex max-w-full flex-col items-center gap-[0.4rem] overflow-x-auto">
+            <div class="grid grid-cols-[auto_auto] pr-[14px]">
+              <div aria-hidden="true" class="col-start-1 row-start-1"></div>
+              <div
+                aria-hidden="true"
+                class="col-start-2 row-start-1 flex h-4 items-end gap-[3px] text-[0.65rem] text-muted-foreground"
+              >
+                <span v-for="(_, ci) in heatmapColumns" :key="ci" class="w-3.5 shrink-0 text-left whitespace-nowrap">{{
+                  monthLabel(ci)
+                }}</span>
+              </div>
+              <div
+                aria-hidden="true"
+                class="col-start-1 row-start-2 flex flex-col gap-[3px] pr-1 text-[0.65rem] text-muted-foreground"
+              >
+                <span v-for="(w, wi) in WDAY_LABELS" :key="wi" class="h-3.5 leading-[14px]">{{ w }}</span>
+              </div>
+              <div class="col-start-2 row-start-2 flex gap-[3px]">
+                <div v-for="(col, ci) in heatmapColumns" :key="ci" class="flex flex-col gap-[3px]">
+                  <template v-for="cell in col" :key="cell.key">
+                    <!-- 补零空位格无数据，不给 tooltip -->
+                    <span v-if="cell.date === null" class="size-3.5 rounded-[3px]" :class="LEVEL_CLASSES[0]"></span>
+                    <Tooltip v-else>
+                      <TooltipTrigger as-child>
+                        <span
+                          class="size-3.5 rounded-[3px] hover:ring-2 hover:ring-foreground/25"
+                          :class="cellClass(cell)"
+                        ></span>
+                      </TooltipTrigger>
+                      <TooltipContent class="flex items-center gap-1.5 px-2 py-1">
+                        <i class="size-2 rounded-full" :class="LEVEL_CLASSES[heatLevel(cell.count)]"></i>
+                        {{ cell.date }}：{{ cell.count }} 轮
+                      </TooltipContent>
+                    </Tooltip>
+                  </template>
+                </div>
               </div>
             </div>
+            <div class="flex items-center justify-end gap-[3px] self-end text-[0.7rem] text-muted-foreground">
+              <span>少</span>
+              <i v-for="lv in 5" :key="lv" class="size-3.5 rounded-[3px]" :class="LEVEL_CLASSES[lv - 1]"></i>
+              <span>多</span>
+            </div>
           </div>
-          <div class="flex items-center justify-end gap-[3px] self-end text-[0.7rem] text-muted-foreground">
-            <span>少</span>
-            <i v-for="lv in 5" :key="lv" class="size-3.5 rounded-[3px]" :class="LEVEL_CLASSES[lv - 1]"></i>
-            <span>多</span>
-          </div>
-        </div>
-      </TooltipProvider>
-    </section>
+        </TooltipProvider>
+      </section>
 
-    <section class="border-t border-border bg-muted/40 px-8 pt-4 pb-5" :class="[RISE, 'motion-safe:[animation-delay:240ms]']">
-      <div class="flex items-center justify-center gap-4">
-        <Label class="gap-1.5">
-          工作
-          <Input v-model.number="workMin" type="number" min="1" :disabled="running" class="w-20 text-center" />
-          分钟
-        </Label>
-        <Label class="gap-1.5">
-          休息
-          <Input v-model.number="breakMin" type="number" min="1" :disabled="running" class="w-20 text-center" />
-          分钟
-        </Label>
-      </div>
-      <div class="mt-2 flex items-center justify-center gap-4">
-        <Label for="long-break-enabled" class="gap-1.5">
-          <Switch id="long-break-enabled" v-model="longBreakEnabled" :disabled="running" />
-          长休息
-        </Label>
-        <Label class="gap-1.5">
-          每
-          <Input
-            v-model.number="cyclesPerLongBreak"
-            type="number"
-            min="1"
-            :disabled="running || !longBreakEnabled"
-            class="w-16 text-center"
-          />
-          轮
-        </Label>
-        <Label class="gap-1.5">
-          时长
-          <Input
-            v-model.number="longBreakMin"
-            type="number"
-            min="1"
-            :disabled="running || !longBreakEnabled"
-            class="w-16 text-center"
-          />
-          分钟
-        </Label>
-      </div>
-      <div class="mt-4 flex items-center justify-center gap-3">
-        <Button size="lg" :disabled="running" @click="start">开始</Button>
-        <Button variant="outline" :disabled="!running" @click="stop">停止</Button>
-        <Button variant="outline" :disabled="phase !== 'work'" @click="togglePause">
-          {{ paused ? "继续" : "暂停" }}
-        </Button>
-        <Button variant="outline" :disabled="phase === 'break'" @click="startNow">立即执行</Button>
-      </div>
-      <Alert v-if="error" variant="destructive" class="mx-auto mt-3 max-w-xl">
-        <AlertDescription>{{ error }}</AlertDescription>
-      </Alert>
-      <div class="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-        <span>v{{ appVersion || "?" }}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-6 px-2 text-xs"
-          :disabled="
-            updateState === 'checking' || updateState === 'downloading' || updateState === 'installing'
-          "
-          @click="updateState === 'newer' ? installUpdate() : checkUpdate()"
-        >
-          {{ updateButtonLabel }}
-        </Button>
-        <span v-if="updateState === 'latest'">已是最新版本</span>
-        <template v-else-if="updateState === 'newer'">
-          <span>发现新版本 {{ latestTag }}</span>
-          <Button
-            variant="link"
-            size="sm"
-            class="h-6 px-1 text-xs"
-            @click="openReleasePage"
-          >
-            手动下载
+      <section class="border-t border-border bg-muted/40 px-8 pt-4 pb-5" :class="[RISE, 'motion-safe:[animation-delay:240ms]']">
+        <div class="flex items-center justify-center gap-3">
+          <Button size="lg" :disabled="running" @click="start">开始</Button>
+          <Button variant="outline" :disabled="!running" @click="stop">停止</Button>
+          <Button variant="outline" :disabled="phase !== 'work'" @click="togglePause">
+            {{ paused ? "继续" : "暂停" }}
           </Button>
-        </template>
-        <span v-else-if="updateState === 'error'" class="max-w-xl break-words text-left">{{ updateError }}</span>
-      </div>
-    </section>
+          <Button variant="outline" :disabled="phase === 'break'" @click="startNow">立即执行</Button>
+        </div>
+        <Alert v-if="error" variant="destructive" class="mx-auto mt-3 max-w-xl">
+          <AlertDescription>{{ error }}</AlertDescription>
+        </Alert>
+      </section>
+    </template>
   </main>
 </template>

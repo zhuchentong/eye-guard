@@ -85,6 +85,12 @@ export function todayCount(stats: DayStat[]): number {
   return stats.find((s) => s.date === today)?.count ?? 0;
 }
 
+/** 清空统计：主键与 legacy 键一并删除，否则 loadStats 的 legacy 回退会让数据复活。 */
+export function clearAllStats(): void {
+  localStorage.removeItem(STATS_KEY);
+  localStorage.removeItem(LEGACY_KEY);
+}
+
 /** 近 n 天每日一条，缺失补零，正序（旧→今）。 */
 export function lastNDays(stats: DayStat[], n: number): DayStat[] {
   const out: DayStat[] = [];
