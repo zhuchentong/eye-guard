@@ -114,7 +114,8 @@ asset_url() { # $1: deb | rpm | appimage
 }
 
 download() { # $1: URL -> 下载到临时目录，输出本地文件路径
-	local dest="$TMP/$(basename "$1")"
+	local dest
+	dest="$TMP/$(basename "$1")"
 	curl -fL --progress-bar -o "$dest" "$1"
 	printf '%s\n' "$dest"
 }
@@ -196,18 +197,21 @@ install_appimage() {
 }
 
 uninstall_all() {
-	resolve_sudo || true
-	if have dpkg && dpkg -s "$BIN_NAME" >/dev/null 2>&1; then
-		info "移除 deb 包"
-		"${SUDO[@]}" apt-get remove -y "$BIN_NAME"
-	fi
-	if have rpm && rpm -q "$BIN_NAME" >/dev/null 2>&1; then
-		info "移除 rpm 包"
-		if have dnf; then
-			"${SUDO[@]}" dnf remove -y "$BIN_NAME"
-		else
-			"${SUDO[@]}" zypper --non-interactive remove "$BIN_NAME"
+	if resolve_sudo; then
+		if have dpkg && dpkg -s "$BIN_NAME" >/dev/null 2>&1; then
+			info "移除 deb 包"
+			"${SUDO[@]}" apt-get remove -y "$BIN_NAME"
 		fi
+		if have rpm && rpm -q "$BIN_NAME" >/dev/null 2>&1; then
+			info "移除 rpm 包"
+			if have dnf; then
+				"${SUDO[@]}" dnf remove -y "$BIN_NAME"
+			else
+				"${SUDO[@]}" zypper --non-interactive remove "$BIN_NAME"
+			fi
+		fi
+	else
+		err "无 root/sudo，跳过系统包卸载（如有 deb/rpm 安装请手动移除）"
 	fi
 	rm -f "$HOME/.local/bin/$BIN_NAME" "$HOME/.local/bin/$BIN_NAME.AppImage"
 	rm -rf "$HOME/.local/lib/$BIN_NAME"
@@ -250,7 +254,7 @@ main() {
 	install_appimage
 }
 
-# 仅直接执行时运行；source 时不跑，便于测试引用内部函数
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+# 仅直接执行时运行（含 curl|bash 管道模式，此时 BASH_SOURCE[0] 未设置）；source 时不跑，便于测试引用内部函数
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
 	main "$@"
 fi
