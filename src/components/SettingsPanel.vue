@@ -12,13 +12,18 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { formatProgress } from "../update-progress";
 import { clearAllStats } from "../stats";
+import { CLOCK_STYLE_LIST } from "../clock-styles";
 import {
   breakMin,
   cyclesPerLongBreak,
+  dailyGoal,
+  dailyGoalEnabled,
+  lockClockStyle,
   lockMessage,
   longBreakEnabled,
   longBreakMin,
   notifyBeforeBreak,
+  panelClockStyle,
   workMin,
 } from "../settings";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -29,6 +34,12 @@ import { Switch } from "@/components/ui/switch";
 
 const props = defineProps<{ running: boolean }>();
 const emit = defineEmits<{ back: []; statsCleared: [] }>();
+
+// 时钟风格两行配置：主面板与锁屏分别独立
+const CLOCK_STYLE_ROWS = [
+  { key: "panel", title: "主面板时钟", desc: "计时视图的显示风格", model: panelClockStyle },
+  { key: "lock", title: "锁屏时钟", desc: "休息遮罩的显示风格", model: lockClockStyle },
+];
 
 const settingsError = ref("");
 
@@ -276,6 +287,24 @@ onUnmounted(() => {
             分钟
           </Label>
         </div>
+        <div class="mt-2 flex flex-wrap items-center gap-4">
+          <Label for="daily-goal-enabled" class="gap-1.5">
+            <Switch id="daily-goal-enabled" v-model="dailyGoalEnabled" />
+            每日目标
+          </Label>
+          <Label class="gap-1.5">
+            <Input
+              v-model.number="dailyGoal"
+              name="dailyGoal"
+              type="number"
+              min="1"
+              autocomplete="off"
+              :disabled="!dailyGoalEnabled"
+              class="w-16 text-center"
+            />
+            轮
+          </Label>
+        </div>
         <p v-if="props.running" class="mt-2 text-xs text-muted-foreground">
           计时进行中，时长暂不可修改
         </p>
@@ -295,17 +324,39 @@ onUnmounted(() => {
 
       <section class="rounded-lg border bg-card p-4">
         <h2 class="mb-3 text-sm font-medium text-muted-foreground">通用</h2>
-        <div class="flex items-center justify-between gap-4">
-          <Label for="autostart" class="min-w-0 flex-col items-start gap-0.5">
-            <span>开机自启</span>
-            <span class="text-xs font-normal text-muted-foreground">登录后自动启动，与托盘菜单同步</span>
-          </Label>
-          <Switch
-            id="autostart"
-            :model-value="autostart"
-            class="shrink-0"
-            @update:model-value="toggleAutostart"
-          />
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-4">
+            <Label for="autostart" class="min-w-0 flex-col items-start gap-0.5">
+              <span>开机自启</span>
+              <span class="text-xs font-normal text-muted-foreground">登录后自动启动，与托盘菜单同步</span>
+            </Label>
+            <Switch
+              id="autostart"
+              :model-value="autostart"
+              class="shrink-0"
+              @update:model-value="toggleAutostart"
+            />
+          </div>
+          <!-- 时钟风格：选项由注册表生成，新样式自动出现 -->
+          <div v-for="row in CLOCK_STYLE_ROWS" :key="row.key" class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <p class="text-sm">{{ row.title }}</p>
+              <p class="text-xs text-muted-foreground">{{ row.desc }}</p>
+            </div>
+            <div role="group" :aria-label="row.title" class="flex shrink-0 gap-1">
+              <Button
+                v-for="s in CLOCK_STYLE_LIST"
+                :key="s.id"
+                :variant="row.model.value === s.id ? 'secondary' : 'ghost'"
+                size="sm"
+                class="h-8 px-3 text-xs"
+                :aria-pressed="row.model.value === s.id"
+                @click="row.model.value = s.id"
+              >
+                {{ s.label }}
+              </Button>
+            </div>
+          </div>
         </div>
       </section>
 

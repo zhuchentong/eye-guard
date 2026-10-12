@@ -3,11 +3,15 @@ import { nextTick } from "vue";
 import {
   breakMin,
   cyclesPerLongBreak,
+  dailyGoal,
+  dailyGoalEnabled,
   initSettings,
+  lockClockStyle,
   lockMessage,
   longBreakEnabled,
   longBreakMin,
   notifyBeforeBreak,
+  panelClockStyle,
   workMin,
 } from "./settings";
 
@@ -77,6 +81,52 @@ describe("loadSettings（initSettings 内含）", () => {
     initSettings();
     expect(notifyBeforeBreak.value).toBe(true);
   });
+
+  it("panelClockStyle / lockClockStyle 默认 digital，保存后可读回", () => {
+    initSettings();
+    expect(panelClockStyle.value).toBe("digital");
+    expect(lockClockStyle.value).toBe("digital");
+    localStorage.setItem("eye-guard.panelClockStyle", "clock");
+    localStorage.setItem("eye-guard.lockClockStyle", "clock");
+    initSettings();
+    expect(panelClockStyle.value).toBe("clock");
+    expect(lockClockStyle.value).toBe("clock");
+  });
+
+  it("时钟风格非法值回退 digital", () => {
+    localStorage.setItem("eye-guard.panelClockStyle", "flip");
+    localStorage.setItem("eye-guard.lockClockStyle", "");
+    initSettings();
+    expect(panelClockStyle.value).toBe("digital");
+    expect(lockClockStyle.value).toBe("digital");
+  });
+
+  it("dailyGoal 默认 8 且开启", () => {
+    initSettings();
+    expect(dailyGoal.value).toBe(8);
+    expect(dailyGoalEnabled.value).toBe(true);
+  });
+
+  it("dailyGoal 存 0 表示关闭，输入框回默认 8 便于重新启用", () => {
+    localStorage.setItem("eye-guard.dailyGoal", "0");
+    initSettings();
+    expect(dailyGoalEnabled.value).toBe(false);
+    expect(dailyGoal.value).toBe(8);
+  });
+
+  it("dailyGoal 合法值读回", () => {
+    localStorage.setItem("eye-guard.dailyGoal", "10");
+    initSettings();
+    expect(dailyGoal.value).toBe(10);
+    expect(dailyGoalEnabled.value).toBe(true);
+  });
+
+  it("dailyGoal 非法值回退 8 且开启", () => {
+    localStorage.setItem("eye-guard.dailyGoal", "abc");
+    initSettings();
+    expect(dailyGoal.value).toBe(8);
+    expect(dailyGoalEnabled.value).toBe(true);
+  });
 });
 
 describe("watch 持久化", () => {
@@ -89,6 +139,22 @@ describe("watch 持久化", () => {
     expect(localStorage.getItem("eye-guard.workMin")).toBe("40");
     expect(localStorage.getItem("eye-guard.lockMessage")).toBe("多眨眨眼");
     expect(localStorage.getItem("eye-guard.notifyBeforeBreak")).toBe("false");
+  });
+
+  it("时钟风格修改写回 localStorage", async () => {
+    initSettings();
+    panelClockStyle.value = "clock";
+    lockClockStyle.value = "clock";
+    await nextTick();
+    expect(localStorage.getItem("eye-guard.panelClockStyle")).toBe("clock");
+    expect(localStorage.getItem("eye-guard.lockClockStyle")).toBe("clock");
+  });
+
+  it("dailyGoal 关闭时以 0 写回", async () => {
+    initSettings();
+    dailyGoalEnabled.value = false;
+    await nextTick();
+    expect(localStorage.getItem("eye-guard.dailyGoal")).toBe("0");
   });
 
   it("关闭长休息时 cyclesPerLongBreak 以 0 持久化", async () => {

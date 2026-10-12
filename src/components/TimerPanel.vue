@@ -4,22 +4,29 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { type PhaseStatus } from "../types";
 import {
+  currentStreak,
   DISPLAY_DAYS,
   lastNDays,
   loadStats,
+  longestStreak,
+  peakCycles,
   recordCompletedCycle,
   saveStats,
   todayCount,
   todayStr,
+  totalCycles,
   type DayStat,
 } from "../stats";
 import {
   breakMin,
   cyclesPerLongBreak,
+  dailyGoal,
+  dailyGoalEnabled,
   initSettings,
   longBreakEnabled,
   longBreakMin,
   notifyBeforeBreak,
+  panelClockStyle,
   workMin,
 } from "../settings";
 import AnimatedClock from "./AnimatedClock.vue";
@@ -40,10 +47,35 @@ const error = ref("");
 
 const running = computed(() => phase.value !== "idle");
 
+// 当前相位总秒数（表盘样式进度映射用）：设置项仅在空闲时可改（运行中禁用），
+// 因此空闲态的设置值与后端配置一致；idle 无相位 → undefined（表盘指针归零）。
+// 已知边界：「立即休息」在从未启动时后端用默认/上次配置，极端情况表盘比例略有偏差（仅影响进度映射）。
+const phaseTotal = computed<number | undefined>(() => {
+  if (phase.value === "work") return Math.floor(workMin.value) * 60;
+  if (phase.value === "break") {
+    return longBreak.value ? Math.floor(longBreakMin.value) * 60 : Math.floor(breakMin.value) * 60;
+  }
+  return undefined;
+});
+
 let unlisteners: UnlistenFn[] = [];
 
 const stats = ref<DayStat[]>([]);
 const today = computed(() => todayCount(stats.value));
+
+// header 日期：方法调用随每秒重渲染刷新，跨天自然更新（不依赖 ICU 拼装，格式恒定）
+function headerDate(): string {
+  const now = new Date();
+  const week = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][now.getDay()];
+  return `${now.getMonth() + 1}月${now.getDate()}日 ${week}`;
+}
+
+// 今日目标进度百分比（目标关闭时进度条不渲染）
+const progressPercent = computed(() =>
+  dailyGoalEnabled.value && dailyGoal.value >= 1
+    ? Math.min(100, Math.round((today.value / dailyGoal.value) * 100))
+    : 0,
+);
 
 // —— 近 26 周（半年）贡献热力图：列 = 周，行 = 周一..周日（存储窗口仍保留 53 周）——
 type HeatCell = { key: string; date: string | null; count: number };
@@ -232,7 +264,7 @@ async function togglePause() {
 </script>
 
 <template>
-  <main class="flex min-h-screen flex-col text-center">
+  <main class="flex min-h-screen flex-col overflow-y-auto text-center">
     <SettingsPanel
       v-if="view === 'settings'"
       :running="running"
@@ -243,7 +275,7 @@ async function togglePause() {
       <header class="flex items-center justify-between px-8 pt-5" :class="RISE">
         <h1 class="text-xl font-semibold">eye-guard</h1>
         <div class="flex items-center gap-2">
-          <span class="text-sm text-muted-foreground">今日 {{ today }} 轮</span>
+          <span class="text-sm text-muted-foreground">{{ headerDate() }}</span>
           <Button variant="ghost" size="icon" aria-label="打开设置" @click="view = 'settings'">
             <svg
               aria-hidden="true"
@@ -265,14 +297,17 @@ async function togglePause() {
         </div>
       </header>
 
-      <section class="flex flex-1 flex-col items-center justify-center" :class="[RISE, 'motion-safe:[animation-delay:120ms]']">
+      <section
+        class="flex flex-1 flex-col items-center justify-center px-8"
+        :class="[RISE, 'motion-safe:[animation-delay:120ms]']"
+      >
         <div
           class="text-[5.5rem] leading-[1.15] font-semibold tabular-nums transition-colors duration-600"
           :class="[CLOCK_COLOR[phase], { 'opacity-45': paused }]"
         >
-          <AnimatedClock :value="remaining" />
+          <AnimatedClock :value="remaining" :total="phaseTotal" :style-id="panelClockStyle" />
         </div>
-        <p class="mb-6 text-muted-foreground">
+        <p class="text-muted-foreground">
           <span v-if="phase === 'work'">工作</span>
           <span v-else-if="phase === 'break'">{{ longBreak ? "长休息" : "休息" }}</span>
           <span v-else>已停止</span>
@@ -280,8 +315,53 @@ async function togglePause() {
           <span v-if="paused"> · 已暂停</span>
         </p>
 
-        <!-- 近 26 周热力图（GitHub 风格）：2×2 网格 = 角空 / 月份行 / 星期列 / 格子区 -->
-        <TooltipProvider :delay-duration="100">
+        <!-- 统计卡：5 指标条（今日含目标）+ 进度条 + 热力图 -->
+        <div class="mt-2 w-full rounded-lg border bg-card px-4 py-3 text-left">
+          <div class="grid grid-cols-5 divide-x divide-border">
+            <div class="flex flex-col items-center gap-0.5 px-2">
+              <span class="text-base font-semibold tabular-nums">
+                {{ today }}<span
+                  v-if="dailyGoalEnabled && dailyGoal >= 1"
+                  class="text-muted-foreground"
+                >/{{ dailyGoal }}</span>
+              </span>
+              <span class="text-xs text-muted-foreground">今日轮数</span>
+            </div>
+            <div class="flex flex-col items-center gap-0.5 px-2">
+              <span class="text-base font-semibold tabular-nums">{{ totalCycles(stats) }}</span>
+              <span class="text-xs text-muted-foreground">累计轮数</span>
+            </div>
+            <div class="flex flex-col items-center gap-0.5 px-2">
+              <span class="text-base font-semibold tabular-nums">{{ peakCycles(stats) }}</span>
+              <span class="text-xs text-muted-foreground">单日峰值</span>
+            </div>
+            <div class="flex flex-col items-center gap-0.5 px-2">
+              <span class="text-base font-semibold tabular-nums">{{ currentStreak(stats) }}</span>
+              <span class="text-xs text-muted-foreground">当前连续天数</span>
+            </div>
+            <div class="flex flex-col items-center gap-0.5 px-2">
+              <span class="text-base font-semibold tabular-nums">{{ longestStreak(stats) }}</span>
+              <span class="text-xs text-muted-foreground">最长连续天数</span>
+            </div>
+          </div>
+          <div
+            v-if="dailyGoalEnabled && dailyGoal >= 1"
+            role="progressbar"
+            :aria-valuenow="Math.min(today, dailyGoal)"
+            aria-valuemin="0"
+            :aria-valuemax="dailyGoal"
+            aria-label="今日目标进度"
+            class="mt-2 h-1 overflow-hidden rounded-full bg-muted"
+          >
+            <div
+              class="h-full rounded-full bg-primary motion-safe:transition-[width] motion-safe:duration-600"
+              :style="{ width: `${progressPercent}%` }"
+            ></div>
+          </div>
+
+          <!-- 近 26 周热力图（GitHub 风格）：2×2 网格 = 角空 / 月份行 / 星期列 / 格子区 -->
+          <div class="mt-3">
+            <TooltipProvider :delay-duration="100">
           <div class="flex max-w-full flex-col items-center gap-[0.4rem] overflow-x-auto">
             <div class="grid grid-cols-[auto_auto] pr-[14px]">
               <div aria-hidden="true" class="col-start-1 row-start-1"></div>
@@ -326,7 +406,9 @@ async function togglePause() {
               <span>多</span>
             </div>
           </div>
-        </TooltipProvider>
+            </TooltipProvider>
+          </div>
+        </div>
       </section>
 
       <section class="border-t border-border bg-muted/40 px-8 pt-4 pb-5" :class="[RISE, 'motion-safe:[animation-delay:240ms]']">

@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearAllStats,
+  currentStreak,
   dateStr,
   lastNDays,
   loadStats,
+  longestStreak,
+  peakCycles,
   recordCompletedCycle,
   saveStats,
   todayCount,
   todayStr,
+  totalCycles,
   WINDOW_DAYS,
 } from "./stats";
 
@@ -129,5 +133,88 @@ describe("loadStats / saveStats", () => {
     expect(localStorage.getItem("eye-guard.stats")).toBeNull();
     expect(localStorage.getItem("eye-guard.todayStats")).toBeNull();
     expect(loadStats()).toEqual([]);
+  });
+});
+
+describe("totalCycles / peakCycles", () => {
+  it("空数据为 0", () => {
+    expect(totalCycles([])).toBe(0);
+    expect(peakCycles([])).toBe(0);
+  });
+
+  it("累计求和与单日峰值", () => {
+    const stats = [
+      { date: "2026-10-01", count: 3 },
+      { date: "2026-10-02", count: 12 },
+      { date: "2026-10-03", count: 7 },
+    ];
+    expect(totalCycles(stats)).toBe(22);
+    expect(peakCycles(stats)).toBe(12);
+  });
+});
+
+describe("currentStreak（今日为 0 时从昨天宽限回数）", () => {
+  const daysAgo = (n: number, count: number) => ({
+    date: dateStr(new Date(Date.now() - n * 86_400_000)),
+    count,
+  });
+
+  it("空数据为 0", () => {
+    expect(currentStreak([])).toBe(0);
+  });
+
+  it("今日有数据：从今天连续回数", () => {
+    expect(currentStreak([daysAgo(0, 2), daysAgo(1, 1), daysAgo(2, 5)])).toBe(3);
+  });
+
+  it("今日为 0：从昨天宽限回数", () => {
+    expect(currentStreak([daysAgo(1, 2), daysAgo(2, 4)])).toBe(2);
+  });
+
+  it("断档（中间缺日）截断", () => {
+    expect(currentStreak([daysAgo(0, 2), daysAgo(2, 4)])).toBe(1);
+  });
+
+  it("今日与昨日均为 0 → 0", () => {
+    expect(currentStreak([daysAgo(3, 5)])).toBe(0);
+  });
+});
+
+describe("longestStreak（窗口内最长连续天数）", () => {
+  it("空数据为 0", () => {
+    expect(longestStreak([])).toBe(0);
+  });
+
+  it("单日数据为 1，全零为 0", () => {
+    expect(longestStreak([{ date: "2026-10-08", count: 1 }])).toBe(1);
+    expect(longestStreak([{ date: "2026-10-08", count: 0 }])).toBe(0);
+  });
+
+  it("跨月末连续（1/30→1/31→2/1）计 3 天", () => {
+    const stats = [
+      { date: "2026-01-30", count: 1 },
+      { date: "2026-01-31", count: 2 },
+      { date: "2026-02-01", count: 1 },
+    ];
+    expect(longestStreak(stats)).toBe(3);
+  });
+
+  it("乱序输入取最长连续段", () => {
+    const stats = [
+      { date: "2026-03-05", count: 1 },
+      { date: "2026-03-01", count: 1 },
+      { date: "2026-03-02", count: 1 },
+      { date: "2026-03-03", count: 1 },
+    ];
+    expect(longestStreak(stats)).toBe(3); // 3/1-3/3
+  });
+
+  it("count=0 的日子断开连续段", () => {
+    const stats = [
+      { date: "2026-03-01", count: 1 },
+      { date: "2026-03-02", count: 0 },
+      { date: "2026-03-03", count: 1 },
+    ];
+    expect(longestStreak(stats)).toBe(1);
   });
 });

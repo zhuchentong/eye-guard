@@ -100,3 +100,53 @@ export function lastNDays(stats: DayStat[], n: number): DayStat[] {
   }
   return out;
 }
+
+// —— 首页统计条指标（均在 53 周滚动窗口内统计；窗口外的历史已被 saveStats 裁剪）——
+
+/** 窗口内累计轮数。 */
+export function totalCycles(stats: DayStat[]): number {
+  return stats.reduce((sum, s) => sum + s.count, 0);
+}
+
+/** 单日峰值轮数，空数据 0。 */
+export function peakCycles(stats: DayStat[]): number {
+  return stats.reduce((max, s) => Math.max(max, s.count), 0);
+}
+
+/** count ≥ 1 视为「有记录的一天」。 */
+const dayMs = 86_400_000;
+
+/**
+ * 当前连续天数：从今天往回数连续有记录的日子。
+ * 今日为 0 时从昨天起算（宽限——当天还没完成不至于清零挫败）。
+ */
+export function currentStreak(stats: DayStat[]): number {
+  const byDate = new Map(stats.map((s) => [s.date, s.count]));
+  const has = (date: string): boolean => (byDate.get(date) ?? 0) >= 1;
+  let cursor = Date.now();
+  if (!has(todayStr())) cursor -= dayMs; // 今日宽限
+  let streak = 0;
+  while (has(dateStr(new Date(cursor)))) {
+    streak += 1;
+    cursor -= dayMs;
+  }
+  return streak;
+}
+
+/** 窗口内最长连续天数：按日期排序后扫描连续段（相邻差恰好一天且均有记录）。 */
+export function longestStreak(stats: DayStat[]): number {
+  const active = stats
+    .filter((s) => s.count >= 1)
+    .map((s) => s.date)
+    .sort();
+  let best = 0;
+  let run = 0;
+  let prevMs = Number.NaN;
+  for (const date of active) {
+    const ms = new Date(`${date}T00:00:00`).getTime();
+    run = ms - prevMs === dayMs ? run + 1 : 1;
+    prevMs = ms;
+    best = Math.max(best, run);
+  }
+  return best;
+}

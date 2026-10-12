@@ -4,6 +4,7 @@
 // 共享同一份状态，无路由/无状态库的最小实现。
 
 import { ref, watch } from "vue";
+import { normalizeClockStyle, type ClockStyleId } from "./clock";
 
 const WORK_KEY = "eye-guard.workMin";
 const BREAK_KEY = "eye-guard.breakMin";
@@ -11,6 +12,9 @@ const LONG_BREAK_KEY = "eye-guard.longBreakMin";
 const CYCLES_KEY = "eye-guard.cyclesPerLongBreak";
 const LOCK_MESSAGE_KEY = "eye-guard.lockMessage";
 const NOTIFY_KEY = "eye-guard.notifyBeforeBreak";
+const PANEL_CLOCK_KEY = "eye-guard.panelClockStyle";
+const LOCK_CLOCK_KEY = "eye-guard.lockClockStyle";
+const GOAL_KEY = "eye-guard.dailyGoal";
 
 export const workMin = ref(25);
 export const breakMin = ref(5);
@@ -20,6 +24,12 @@ export const cyclesPerLongBreak = ref(4);
 export const longBreakEnabled = ref(true);
 export const lockMessage = ref("");
 export const notifyBeforeBreak = ref(true);
+// 时钟风格：主面板与锁屏分别配置（锁屏为独立 webview，下次休息窗口创建时生效）
+export const panelClockStyle = ref<ClockStyleId>(normalizeClockStyle(null));
+export const lockClockStyle = ref<ClockStyleId>(normalizeClockStyle(null));
+// 每日目标轮数：0 = 关闭（持久层语义），UI 由 dailyGoalEnabled 反推开关
+export const dailyGoal = ref(8);
+export const dailyGoalEnabled = ref(true);
 
 /** 分钟数：非有限/小于 1 视为非法回退默认，小数向下取整。 */
 function loadMinutes(key: string, fallback: number): number {
@@ -37,6 +47,11 @@ function loadSettings(): void {
   longBreakEnabled.value = cycles !== "0";
   lockMessage.value = localStorage.getItem(LOCK_MESSAGE_KEY) ?? "";
   notifyBeforeBreak.value = localStorage.getItem(NOTIFY_KEY) !== "false";
+  panelClockStyle.value = normalizeClockStyle(localStorage.getItem(PANEL_CLOCK_KEY));
+  lockClockStyle.value = normalizeClockStyle(localStorage.getItem(LOCK_CLOCK_KEY));
+  const goal = localStorage.getItem(GOAL_KEY);
+  dailyGoal.value = loadMinutes(GOAL_KEY, 8); // 存 "0" 时回退默认 8，便于重新启用
+  dailyGoalEnabled.value = goal !== "0";
 }
 
 let initialized = false;
@@ -54,4 +69,9 @@ export function initSettings(): void {
   });
   watch(lockMessage, (v) => localStorage.setItem(LOCK_MESSAGE_KEY, v));
   watch(notifyBeforeBreak, (v) => localStorage.setItem(NOTIFY_KEY, String(v)));
+  watch(panelClockStyle, (v) => localStorage.setItem(PANEL_CLOCK_KEY, v));
+  watch(lockClockStyle, (v) => localStorage.setItem(LOCK_CLOCK_KEY, v));
+  watch([dailyGoalEnabled, dailyGoal], ([enabled, goal]) => {
+    localStorage.setItem(GOAL_KEY, String(enabled ? goal : 0));
+  });
 }

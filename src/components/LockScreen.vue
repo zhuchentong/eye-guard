@@ -3,16 +3,24 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { type PhaseStatus } from "../types";
+import { breakMin, initSettings, lockClockStyle, longBreakMin } from "../settings";
 import AnimatedClock from "./AnimatedClock.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
 const remaining = ref(0);
+// 本次休息是否为长休息（表盘进度映射用）：get_status 取初值，每 tick 随载荷校正
+const longBreak = ref(false);
 const error = ref("");
 // 自定义锁屏文案的接入点：设置该 localStorage 键即可覆盖默认提示
 const lockMessage = ref(localStorage.getItem("eye-guard.lockMessage") ?? "");
 // 休息即将结束的提示脉冲（避开初始 remaining=0）
 const ending = computed(() => remaining.value > 0 && remaining.value <= 3);
+
+// 当前休息相位总秒数（锁屏只出现在 break 相位）
+const phaseTotal = computed(
+  () => Math.floor(longBreak.value ? longBreakMin.value : breakMin.value) * 60,
+);
 
 let unlisten: UnlistenFn | undefined;
 
@@ -26,12 +34,16 @@ async function skip() {
 }
 
 onMounted(async () => {
+  // 时钟风格等设置：锁屏为独立 webview，创建时读最新持久化值
+  initSettings();
   unlisten = await listen<PhaseStatus>("timer-tick", (e) => {
     remaining.value = e.payload.remaining_secs;
+    longBreak.value = e.payload.long_break;
   });
   try {
     const s = await invoke<PhaseStatus>("get_status");
     remaining.value = s.remaining_secs;
+    longBreak.value = s.long_break;
   } catch {
     // 等 timer-tick 事件兜底
   }
@@ -57,7 +69,12 @@ const RISE =
     <div :class="[RISE, 'motion-safe:[animation-delay:150ms]']">
       <!-- 脉冲放在内层，避免与入场动画的 animation 属性相互覆盖 -->
       <div :class="{ 'motion-safe:animate-pulse-soft': ending }">
-        <AnimatedClock class="text-[8rem] font-semibold" :value="remaining" />
+        <AnimatedClock
+          class="text-[8rem] font-semibold"
+          :value="remaining"
+          :total="phaseTotal"
+          :style-id="lockClockStyle"
+        />
       </div>
     </div>
 

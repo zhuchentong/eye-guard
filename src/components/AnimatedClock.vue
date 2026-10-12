@@ -1,20 +1,17 @@
 <script setup lang="ts">
+// 时钟样式分发器：按 styleId 渲染对应 face（见 clock-styles.ts 注册表）。
+// 纯编排组件：不感知设置/时间来源——styleId 由调用方显式传入
+// （主面板 panelClockStyle、锁屏 lockClockStyle 分别配置），
+// total 为当前相位总秒数（可选，表盘进度映射用，idle 时缺省归零）。
 import { computed } from "vue";
-import NumberFlow from "@number-flow/vue";
+import { DEFAULT_CLOCK_STYLE, type ClockStyleId } from "../clock";
+import { CLOCK_STYLES } from "../clock-styles";
 
-const props = defineProps<{ value: number }>();
+const props = defineProps<{ value: number; total?: number; styleId?: ClockStyleId }>();
 
-// 与 Intl.NumberFormat 对齐：两位整数、无千分位
-const DIGIT_FORMAT = { minimumIntegerDigits: 2, useGrouping: false } as const;
-
-const minutes = computed(() => Math.floor(props.value / 60));
-const seconds = computed(() => props.value % 60);
+const face = computed(() => CLOCK_STYLES[props.styleId ?? DEFAULT_CLOCK_STYLE]);
 </script>
 
 <template>
-  <span class="inline-flex items-baseline tabular-nums">
-    <NumberFlow :value="minutes" :format="DIGIT_FORMAT" />
-    <span class="inline-block">:</span>
-    <NumberFlow :value="seconds" :format="DIGIT_FORMAT" />
-  </span>
+  <component :is="face.component" :value="value" :total="total" />
 </template>
