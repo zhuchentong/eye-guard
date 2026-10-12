@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**eye-guard** (v0.1.1) is a cross-platform desktop app built with Tauri v2 + Vue 3 + TypeScript + Vite. Implemented feature: a pomodoro-style eye-rest timer — a Rust background thread counts work/break cycles, fires a system notification 30 s before break, pops frameless fullscreen **lock overlay windows** (one per monitor, label prefix `lock-*`) that cover the screen during breaks, and auto-loops to the next cycle. The app is tray-resident: closing the main window hides it, and the tray menu offers show/hide, "立即休息", and quit.
+**eye-guard** (v0.1.4) is a cross-platform desktop app built with Tauri v2 + Vue 3 + TypeScript + Vite. Implemented feature: a pomodoro-style eye-rest timer — a Rust background thread counts work/break cycles, fires a system notification 30 s before break, pops frameless fullscreen **lock overlay windows** (one per monitor, label prefix `lock-*`) that cover the screen during breaks, and auto-loops to the next cycle. 工作相位可暂停/继续。 The app is tray-resident: closing the main window hides it, and the tray menu offers show/hide, "立即休息", 开机自启 toggle, and quit. Additional integrations: **single instance**（二次启动唤出已有实例；`eye-guard --break` 经单实例通道转发触发立即休息，冷启动同参数直接生效）、**global shortcut Alt+Shift+B**（Wayland 下不可用，注册失败不致命）、**应用内自动更新**（设置区显示版本 + 检查更新，下载安装后 `relaunch` 重启）。
 
 ## Architecture & Data Flow
 
@@ -17,31 +17,34 @@ Two-process Tauri v2 app:
 
 ## Key Directories
 
-- `src/` — Vue frontend: `App.vue` (window-label dispatcher), `components/TimerPanel.vue` (main timer UI), `components/LockScreen.vue` (fullscreen break overlay), `components/AnimatedClock.vue` (`@number-flow/vue` 数字滚动时钟，两个界面共用), `components/ui/` (shadcn-vue 原语：button/input/label/switch/alert/tooltip), `types.ts` (`PhaseStatus`；`formatClock` 目前无组件使用), `main.ts` (entry), `vite-env.d.ts`.
+- `src/` — Vue frontend: `App.vue` (window-label dispatcher), `components/TimerPanel.vue` (main timer UI：计时/设置持久化/贡献热力图/应用内更新 UI), `components/LockScreen.vue` (fullscreen break overlay), `components/AnimatedClock.vue` (`@number-flow/vue` 数字滚动时钟，两个界面共用), `components/ui/` (shadcn-vue 原语：button/input/label/switch/alert/tooltip), `stats.ts` + `stats.test.ts`（今日轮数/热力图统计与单测）, `update-progress.ts` + `update-progress.test.ts`（更新下载进度格式化纯函数，百分比/字节降级）, `types.ts` (`PhaseStatus`；`formatClock` 目前无组件使用), `main.ts` (entry), `vite-env.d.ts`.
 - `src-tauri/src/` — Rust backend: `lib.rs` (app builder + commands), `main.rs` (entry).
-- `src-tauri/capabilities/` — Tauri v2 permission files (`default.json`).
+- `src-tauri/capabilities/` — Tauri v2 permission files (`default.json`, `updater.json`).
+- `scripts/` — `install.sh`（用户一键安装：按发行版选 deb/rpm/AppImage，支持 `GH_MIRROR` 镜像与 `--uninstall`）、`sync-version.mjs`（bumpp execute 钩子，同步四处版本，带替换计数守卫）。`bump.config.ts` — bumpp 配置（release 流程见下）。
 - `src-tauri/gen/`, `src-tauri/icons/` — generated output; never hand-edit (`gen/schemas/` regenerates from capabilities).
 - `public/` — static assets copied verbatim into the bundle.
 
 ## Development Commands
 
-Package manager: **pnpm only** (lockfile: `pnpm-lock.yaml`).
+Package manager: **pnpm only** (lockfile: `pnpm-lock.yaml`). Node ≥ 22；`packageManager` 字段锁定 pnpm 版本（`corepack enable` 可得正确版本）。
 
 ```sh
 pnpm install
 pnpm dev            # Vite dev server on http://localhost:1420 (strictPort)
 pnpm build          # vue-tsc --noEmit && vite build → dist/
-pnpm test           # vitest run（jsdom 环境，覆盖 src/stats.ts 统计逻辑）
+pnpm test           # vitest run（jsdom：stats 统计 + update-progress 格式化）
 pnpm preview
-pnpm tauri dev      # full desktop app (wires pnpm dev → devUrl :1420)
-pnpm tauri build    # release bundle, targets "all"；开启 createUpdaterArtifacts 后需 TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]（见 README「开发」）
+pnpm tauri dev      # full desktop app (wires pnpm dev → devUrl :1420；dev 模式「检查更新」降级为打开 Releases 页)
+pnpm tauri build    # release bundle, targets "all"；createUpdaterArtifacts 已开启——无签名 env 直接失败：
+                    #   export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/eye-guard.key)"
+                    #   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""   # 无密码也要显式空串
 ```
 
 Rust tooling (run inside `src-tauri/`): `cargo fmt`, `cargo clippy`, `cargo test` — default config, no custom rustfmt/clippy settings.
 
 **Port 1420 is contractual**: `vite.config.ts` `strictPort` must match `tauri.conf.json` `build.devUrl`. Never change one without the other.
 
-发布：`pnpm release`（bumpp 交互）→ `bump.config.ts` 的 execute 钩子经 `scripts/sync-version.mjs` 同步四处版本（带替换计数守卫）→ 提交 + `v*` tag → `release.yml` 构建 deb/rpm/AppImage 并发 Release。手动验证流水线：Actions 页 `workflow_dispatch`；tag push 时 release.yml 校验 tag 版本与 `tauri.conf.json` 一致，不一致直接失败（v0.1.1 首发踩中）。注意：bumpp 必须保持 `commit.all: true`（默认路径限定提交会丢弃 sync 文件）；release 上传 glob 显式三目录（宽 glob 会把 AppImage 解包文件一起传并触发次级限流）。
+发布：`pnpm release`（bumpp 交互）→ `bump.config.ts` 的 execute 钩子经 `scripts/sync-version.mjs` 同步四处版本（带替换计数守卫）→ 提交 + `v*` tag → `release.yml` 构建 deb/rpm/AppImage 并发 Release。手动验证流水线：Actions 页 `workflow_dispatch`；tag push 时 release.yml 校验 tag 版本与 `tauri.conf.json` 一致，不一致直接失败（v0.1.1 首发踩中）。注意：`bump.config.ts` 必须保持字符串形式 `commit` + 顶层 `all: true`——bumpp 12.3.0 的 normalizeOptions 会静默丢弃对象形式的 message/all（v0.1.2 踩中），且路径限定提交会丢掉 sync 脚本改动的清单文件；release 上传 glob 显式三目录（宽 glob 会把 AppImage 解包文件一起传并触发次级限流），`latest.json` 置首保证更新可发现。
 
 ## Code Conventions & Common Patterns
 
@@ -56,9 +59,9 @@ Rust tooling (run inside `src-tauri/`): `cargo fmt`, `cargo clippy`, `cargo test
 ## Important Files
 
 - `src/App.vue` — window-label dispatcher (`main` → TimerPanel, `lock-*` → LockScreen)；无全局样式。
-- `src-tauri/src/lib.rs` — timer state machine, worker thread, overlay/tray management, plugins (`tauri_plugin_single_instance` — must register first, 支持 `--break` argv 转发, `tauri_plugin_autostart` — tray 开机自启 toggle, `tauri_plugin_global_shortcut` — `break_shortcut()` = Alt+Shift+B 触发立即休息, Linux-Wayland 下不可用需桌面快捷键 + `--break`, `tauri_plugin_opener`, `tauri_plugin_notification`, `tauri_plugin_updater` — 应用内自动更新（`capabilities/updater.json` 授权，endpoint 为 GitHub Releases 静态 `latest.json`，签名密钥见 README「开发」）, `tauri_plugin_process` — relaunch), command registry, `#[cfg(test)]` unit tests.
+- `src-tauri/src/lib.rs` — timer state machine, worker thread, overlay/tray management（休息态切换内嵌的 `icons/tray-break.png` 托盘图标，`image-png` feature 解码）, plugins (`tauri_plugin_single_instance` — must register first, 支持 `--break` argv 转发与冷启动参数, `tauri_plugin_autostart` — tray 开机自启 toggle, `tauri_plugin_global_shortcut` — `break_shortcut()` = Alt+Shift+B 触发立即休息, Linux-Wayland 下不可用需桌面快捷键 + `--break`, `tauri_plugin_opener`, `tauri_plugin_notification`, `tauri_plugin_updater` — 应用内自动更新（`capabilities/updater.json` 授权，endpoint 为 GitHub Releases 静态 `latest.json`，签名密钥见 README「开发」）, `tauri_plugin_process` — relaunch), command registry, `#[cfg(test)]` unit tests.
 - `src-tauri/tauri.conf.json` — identity (`com.zhuchentong.eye-guard`), single 800×600 window (label `main`), bundling; CSP：`default-src 'self'` + 样式放行 `unsafe-inline`（Vue/NumberFlow 内联样式），`devCsp` 额外放行 `ws://localhost:1420` 与 `http://localhost:1420`（Vite HMR）。
-- `src-tauri/Cargo.toml` — deps: `tauri 2` (`tray-icon` feature), `tauri-plugin-opener`, `tauri-plugin-notification`, `parking_lot`, `serde`/`serde_json`; Linux-gated (`cfg(target_os = "linux")`): `gtk`/`gdk` 0.18 + `gtk-layer-shell` 0.8 (`v0_5` feature, for Wayland per-monitor lock overlays); dev-dep `tauri` with `test` feature (mock runtime); hardened release profile (lto, `panic="abort"`, strip).
+- `src-tauri/Cargo.toml` — deps: `tauri 2` (`tray-icon` + `image-png` features), `parking_lot`, `serde`/`serde_json`, plugins `single-instance`/`autostart`/`global-shortcut`/`opener`/`notification`/`updater`/`process`; Linux-gated (`cfg(target_os = "linux")`): `gtk`/`gdk` 0.18 + `gtk-layer-shell` 0.8 (`v0_5` feature, for Wayland per-monitor lock overlays); dev-dep `tauri` with `test` feature (mock runtime); hardened release profile (lto, `panic="abort"`, strip).
 - `vite.config.ts`, `tsconfig.json`, `tsconfig.node.json` — build/typecheck config.
 - `package.json` — scripts and dependency versions.
 
@@ -74,6 +77,6 @@ Rust tooling (run inside `src-tauri/`): `cargo fmt`, `cargo clippy`, `cargo test
 
 ## Testing & QA
 
-- **Rust unit tests exist** in `src-tauri/src/lib.rs` (`#[cfg(test)] mod tests`, 10 tests): 两条 `pace_tick` 网格测试（秒级）+ zero-duration rejection、`end_break_early` guard、idle→break worker spawn + auto-cycle、running-timer break takeover、pause 冻结/恢复 + break 相位拒绝、`tray_title` 纯函数（相位/paused/补零格式）。4 条时序测试跑真实 1 s tick（配置已缩短至 work 4s / break 2s 量级）— 整套实测约 7 s，且 `idle_break_spawns_worker_and_auto_cycles` 会触发真实 dbus 通知。单个测试：`cargo test <name>`。
-- **Frontend tests** in `src/stats.test.ts` — vitest run（jsdom，14 条）覆盖 `src/stats.ts` 统计逻辑（跨日累加、53 周滚动窗口裁剪、legacy 迁移、容错）。仍无 JS linter/formatter setup。
-- QA gates（`ci.yml` 同款）: `pnpm test`（vitest）→ `pnpm build`（内含 `vue-tsc --noEmit`）；Rust: `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`（zero warnings expected; repo rule: use `parking_lot::Mutex`, never `.lock().unwrap()`）+ `cargo test`。Rust CI 锚定 ubuntu-24.04（`libgtk-layer-shell-dev` 0.8.x 与 Cargo 的 `v0_5` feature 绑定）。
+- **Rust unit tests exist** in `src-tauri/src/lib.rs` (`#[cfg(test)] mod tests`, 11 tests): 两条 `pace_tick` 网格测试（秒级）+ zero-duration rejection、`end_break_early` guard、idle→break worker spawn + auto-cycle、running-timer break takeover、pause 冻结/恢复 + break 相位拒绝、break takeover 清除 pause、`tray_title` 纯函数（相位/paused/补零格式）+ tray 相位编码。4 条时序测试跑真实 1 s tick（配置已缩短至 work 4s / break 2s 量级）— 整套实测约 7 s，且 `idle_break_spawns_worker_and_auto_cycles` 会触发真实 dbus 通知。单个测试：`cargo test <name>`。
+- **Frontend tests** — vitest run（jsdom，共 18 条）：`src/stats.test.ts`（14 条）覆盖 `src/stats.ts` 统计逻辑（跨日累加、53 周滚动窗口裁剪、legacy 迁移、容错），`src/update-progress.test.ts`（4 条）覆盖下载进度格式化。仍无 JS linter/formatter setup。
+- QA gates（`ci.yml` 同款）: `pnpm test`（vitest）→ `pnpm build`（内含 `vue-tsc --noEmit`）；Rust: `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`（zero warnings expected; repo rule: use `parking_lot::Mutex`, never `.lock().unwrap()`）+ `cargo test`。CI 两个 job 均锚定 ubuntu-24.04（`libgtk-layer-shell-dev` 0.8.x 与 Cargo 的 `v0_5` feature 绑定）。
