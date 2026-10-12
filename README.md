@@ -19,6 +19,8 @@ Linux x86_64，一行命令。脚本按发行版自动选择：有 `apt` 装 deb
 curl -fsSL https://raw.githubusercontent.com/zhuchentong/eye-guard/master/scripts/install.sh | bash
 ```
 
+> 已装 v0.1.1 及更早版本的直接重跑上述命令即可升级；旧版没有版本显示与更新提示，无法在应用内感知新版本。
+
 网络受限时加镜像前缀（脚本内产物下载同走该镜像，格式为 `<镜像>/https://github.com/...`）：
 
 ```sh
@@ -34,6 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/zhuchentong/eye-guard/master/script
 ## 功能
 
 - 番茄钟循环：工作 → 休息 → 下一轮，自动循环；每 N 轮可进入一次长休息（可关闭）；工作相位可暂停/继续
+- 设置区显示当前版本，可手动「检查更新」（对比 GitHub 最新 Release，有新版一键打开下载页）
 - 休息前 30 秒系统通知预告（工作时长 ≤ 30 秒时改为开始即发）；休息结束再发「休息结束」通知
 - 休息时按显示器数量弹出**全屏锁定遮罩**，倒计时结束自动撤除（Alt-F4 无法关闭，只能等倒计时或点"跳过休息"）
 - 托盘常驻：显示/隐藏窗口、立即休息、开机自启、退出；托盘标题实时显示剩余时间（如「工作 24:59」；GNOME 的 AppIndicator 扩展可能不渲染标题）；主窗口关窗即隐藏到托盘

@@ -18,8 +18,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'",
-      "devCsp": "default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://localhost:1420 http://localhost:1420"
+      "csp": "default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.github.com ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:1420 http://localhost:1420 https://api.github.com ipc: http://ipc.localhost"
     }
   },
   "bundle": {

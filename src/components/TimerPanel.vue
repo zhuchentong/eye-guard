@@ -2,7 +2,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { type PhaseStatus } from "../types";
+import { compareVersions, fetchLatestTag, RELEASES_PAGE_URL } from "../update-check";
 import {
   DISPLAY_DAYS,
   lastNDays,
@@ -38,6 +41,11 @@ const cyclesPerLongBreak = ref(4);
 // 长休息开关：关闭时 cyclesPerLongBreak 以 0 持久化（后端 0 = 禁用）
 const longBreakEnabled = ref(true);
 const error = ref("");
+
+// —— 版本显示与更新检查 ——
+const appVersion = ref("");
+const latestTag = ref("");
+const updateState = ref<"idle" | "checking" | "latest" | "newer" | "error">("idle");
 
 const running = computed(() => phase.value !== "idle");
 
@@ -146,6 +154,12 @@ onMounted(async () => {
   else if (localStorage.getItem(CYCLES_KEY) === "0") longBreakEnabled.value = false; // 上次禁用；输入框保留默认值便于重新启用
   stats.value = loadStats();
 
+  try {
+    appVersion.value = await getVersion();
+  } catch {
+    // 取不到时界面显示未知，检查更新会提示失败
+  }
+
   unlisteners.push(
     await listen<PhaseStatus>("timer-tick", (e) => apply(e.payload)),
     await listen<PhaseStatus>("phase-changed", (e) => apply(e.payload)),
@@ -232,6 +246,24 @@ async function togglePause() {
   } catch (e) {
     error.value = String(e);
   }
+}
+
+// —— 更新检查：手动触发；当前版本未知时视为失败 ——
+async function checkUpdate() {
+  if (updateState.value === "checking") return;
+  updateState.value = "checking";
+  try {
+    latestTag.value = await fetchLatestTag();
+    if (!appVersion.value) throw new Error("当前版本未知");
+    updateState.value =
+      compareVersions(latestTag.value, appVersion.value) > 0 ? "newer" : "latest";
+  } catch {
+    updateState.value = "error";
+  }
+}
+
+function openReleasePage() {
+  void openUrl(RELEASES_PAGE_URL);
 }
 </script>
 
@@ -358,6 +390,29 @@ async function togglePause() {
       <Alert v-if="error" variant="destructive" class="mx-auto mt-3 max-w-xl">
         <AlertDescription>{{ error }}</AlertDescription>
       </Alert>
+      <div class="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+        <span>v{{ appVersion || "?" }}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-xs"
+          :disabled="updateState === 'checking'"
+          @click="checkUpdate"
+        >
+          {{ updateState === "checking" ? "检查中…" : "检查更新" }}
+        </Button>
+        <span v-if="updateState === 'latest'">已是最新版本</span>
+        <Button
+          v-else-if="updateState === 'newer'"
+          variant="link"
+          size="sm"
+          class="h-6 px-1 text-xs"
+          @click="openReleasePage"
+        >
+          发现新版本 {{ latestTag }}，点击下载
+        </Button>
+        <span v-else-if="updateState === 'error'">检查失败</span>
+      </div>
     </section>
   </main>
 </template>
