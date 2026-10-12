@@ -1,0 +1,10 @@
+{
+  "$schema": "./gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "应用内自动更新：仅主窗口可检查/下载/安装更新并重启",
+  "windows": ["main"],
+  "permissions": [
+    "updater:default",
+    "process:allow-restart"
+  ]
+}

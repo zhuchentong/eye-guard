@@ -4,8 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { formatProgress } from "../update-progress";
 import { type PhaseStatus } from "../types";
-import { compareVersions, fetchLatestTag, RELEASES_PAGE_URL } from "../update-check";
 import {
   DISPLAY_DAYS,
   lastNDays,
@@ -42,10 +44,30 @@ const cyclesPerLongBreak = ref(4);
 const longBreakEnabled = ref(true);
 const error = ref("");
 
-// —— 版本显示与更新检查 ——
+// —— 版本显示与应用内更新（tauri-plugin-updater）——
+// dev（未打包）运行环境没有可安装的产物：检查更新直接降级为打开 Releases 页
+const RELEASES_PAGE_URL = "https://github.com/zhuchentong/eye-guard/releases/latest";
 const appVersion = ref("");
 const latestTag = ref("");
-const updateState = ref<"idle" | "checking" | "latest" | "newer" | "error">("idle");
+const updateState = ref<
+  "idle" | "checking" | "latest" | "newer" | "downloading" | "installing" | "error"
+>("idle");
+const updateProgress = ref(""); // 下载进度展示文本（百分比 / 已下载字节）
+const updateError = ref("检查失败");
+let pendingUpdate: Update | null = null;
+
+const updateButtonLabel = computed(
+  () =>
+    ({
+      idle: "检查更新",
+      checking: "检查中…",
+      latest: "检查更新",
+      newer: "立即更新",
+      downloading: `下载中 ${updateProgress.value}`,
+      installing: "安装中…",
+      error: "检查更新",
+    })[updateState.value],
+);
 
 const running = computed(() => phase.value !== "idle");
 
@@ -248,16 +270,65 @@ async function togglePause() {
   }
 }
 
-// —— 更新检查：手动触发；当前版本未知时视为失败 ——
+// —— 应用内更新：插件统一负责发现/比对/下载/安装 ——
 async function checkUpdate() {
-  if (updateState.value === "checking") return;
+  if (
+    updateState.value === "checking" ||
+    updateState.value === "downloading" ||
+    updateState.value === "installing"
+  ) {
+    return;
+  }
+  if (import.meta.env.DEV) {
+    openReleasePage(); // 未打包环境无 updater 产物可装，降级为浏览器下载
+    return;
+  }
   updateState.value = "checking";
+  updateError.value = "检查失败";
   try {
-    latestTag.value = await fetchLatestTag();
-    if (!appVersion.value) throw new Error("当前版本未知");
-    updateState.value =
-      compareVersions(latestTag.value, appVersion.value) > 0 ? "newer" : "latest";
-  } catch {
+    const prev = pendingUpdate;
+    pendingUpdate = await check();
+    // Update 持有 Rust 侧资源，替换前回收旧引用（托盘长驻进程不留泄漏）
+    if (prev && prev !== pendingUpdate) void prev.close();
+    if (pendingUpdate) {
+      latestTag.value = `v${pendingUpdate.version}`;
+      updateState.value = "newer";
+    } else {
+      updateState.value = "latest";
+    }
+  } catch (e) {
+    updateError.value = `检查失败：${e}`;
+    updateState.value = "error";
+  }
+}
+
+// 下载 + 安装 + 自动重启；任一步失败给出错误与手动下载兜底
+async function installUpdate() {
+  if (
+    !pendingUpdate ||
+    updateState.value === "downloading" ||
+    updateState.value === "installing"
+  ) {
+    return;
+  }
+  updateState.value = "downloading";
+  updateProgress.value = "";
+  try {
+    let received = 0;
+    let total: number | null = null;
+    await pendingUpdate.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        total = event.data.contentLength ?? null;
+      } else if (event.event === "Progress") {
+        received += event.data.chunkLength;
+        updateProgress.value = formatProgress(received, total);
+      } else if (event.event === "Finished") {
+        updateState.value = "installing";
+      }
+    });
+    await relaunch(); // Linux：安装完成后必须重启才会运行新版本
+  } catch (e) {
+    updateError.value = `更新失败：${e}`;
     updateState.value = "error";
   }
 }
@@ -396,22 +467,26 @@ function openReleasePage() {
           variant="ghost"
           size="sm"
           class="h-6 px-2 text-xs"
-          :disabled="updateState === 'checking'"
-          @click="checkUpdate"
+          :disabled="
+            updateState === 'checking' || updateState === 'downloading' || updateState === 'installing'
+          "
+          @click="updateState === 'newer' ? installUpdate() : checkUpdate()"
         >
-          {{ updateState === "checking" ? "检查中…" : "检查更新" }}
+          {{ updateButtonLabel }}
         </Button>
         <span v-if="updateState === 'latest'">已是最新版本</span>
-        <Button
-          v-else-if="updateState === 'newer'"
-          variant="link"
-          size="sm"
-          class="h-6 px-1 text-xs"
-          @click="openReleasePage"
-        >
-          发现新版本 {{ latestTag }}，点击下载
-        </Button>
-        <span v-else-if="updateState === 'error'">检查失败</span>
+        <template v-else-if="updateState === 'newer'">
+          <span>发现新版本 {{ latestTag }}</span>
+          <Button
+            variant="link"
+            size="sm"
+            class="h-6 px-1 text-xs"
+            @click="openReleasePage"
+          >
+            手动下载
+          </Button>
+        </template>
+        <span v-else-if="updateState === 'error'" class="max-w-xl break-words text-left">{{ updateError }}</span>
       </div>
     </section>
   </main>

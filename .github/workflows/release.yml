@@ -50,15 +50,55 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm tauri build
+        env:
+          # updater 签名：私钥存 GitHub Secrets；无密码时 PASSWORD 须显式空串
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Generate updater manifest (latest.json)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          BUNDLE=src-tauri/target/release/bundle
+          DEB=$(ls "$BUNDLE"/deb/*.deb | head -n1)
+          RPM=$(ls "$BUNDLE"/rpm/*.rpm | head -n1)
+          # AppImage 的 updater 产物是裸 AppImage + .AppImage.sig
+          #（Tauri 2.12 bundler 不产 tar.gz；插件对 ELF 原生原地替换）
+          APPIMAGE=$(ls "$BUNDLE"/appimage/*.AppImage | head -n1)
+          jq -n --arg version "$TAG_VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg deb_url "$BASE/$(basename "$DEB")" --arg deb_sig "$(cat "$DEB.sig")" \
+            --arg rpm_url "$BASE/$(basename "$RPM")" --arg rpm_sig "$(cat "$RPM.sig")" \
+            --arg app_url "$BASE/$(basename "$APPIMAGE")" --arg app_sig "$(cat "$APPIMAGE.sig")" \
+            '{
+              version: $version,
+              pub_date: $date,
+              platforms: {
+                "linux-x86_64-deb":     { signature: $deb_sig, url: $deb_url },
+                "linux-x86_64-rpm":     { signature: $rpm_sig, url: $rpm_url },
+                "linux-x86_64-appimage": { signature: $app_sig, url: $app_url },
+                # 兜底：二进制未经 bundler 打包补丁（bundle_type 未知，如手动替换的二进制）
+                # 时命中；拿到 AppImage 下载后安装失败——比 TargetNotFound 更可诊断
+                "linux-x86_64":          { signature: $app_sig, url: $app_url }
+              }
+            }' > latest.json
+          cat latest.json
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          # 显式三类：APPIMAGE_EXTRACT_AND_RUN 会在 bundle/ 留下解包文件，
-          # 宽 glob 会把数百个运行时文件一起上传并触发次级限流
+          # 显式枚举：APPIMAGE_EXTRACT_AND_RUN 会在 bundle/ 留下解包文件，
+          # 宽 glob 会把数百个运行时文件一起上传并触发次级限流；
+          # latest.json 置首——release 成为 latest 后客户端立即可发现更新；
+          # *.sig 供 updater 校验
           files: |
+            latest.json
             src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/deb/*.deb.sig
             src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/rpm/*.rpm.sig
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
           generate_release_notes: true

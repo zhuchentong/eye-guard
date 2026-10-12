@@ -69,9 +69,16 @@ pnpm release
 pnpm install
 pnpm dev            # Vite dev server，http://localhost:1420（strictPort，勿改）
 pnpm build          # vue-tsc --noEmit && vite build
-pnpm test           # vitest run（jsdom，统计逻辑单测）
-pnpm tauri dev      # 完整桌面应用
-pnpm tauri build    # 发布打包
+pnpm test           # vitest run（jsdom，统计/更新进度单测）
+pnpm tauri dev      # 完整桌面应用（dev 模式下「检查更新」降级为打开 Releases 页）
+pnpm tauri build    # 发布打包（需签名 env，见下）
+```
+
+应用内自动更新（`tauri-plugin-updater`）：release.yml 构建时用 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（GitHub Secrets）签名产物并生成 `latest.json`；更新清单固定走 `releases/latest/download/latest.json`。**开启 `createUpdaterArtifacts` 后，本地 `pnpm tauri build` 也必须提供签名环境变量**，否则直接失败：
+
+```sh
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/eye-guard.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""   # 无密码也要显式空串
 ```
 
 Rust 工具链（在 `src-tauri/` 内执行）：
