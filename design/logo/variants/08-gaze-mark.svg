@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- 08 目光 Gaze Mark — 息时迭代：瞳孔右上留一粒圆孔高光（圆角负形） -->
+  <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+  <path d="M50 42.5 a7.5 7.5 0 1 0 0 15 a7.5 7.5 0 1 0 0 -15 Z M53.5 44.4 a2.6 2.6 0 1 0 0 5.2 a2.6 2.6 0 1 0 0 -5.2 Z" fill="currentColor" fill-rule="evenodd"/>
+</svg>

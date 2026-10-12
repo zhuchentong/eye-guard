@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- 03 柔波 Soft Wave — 线条系统：舒缓呼吸波形 + 呼吸圆点 -->
+  <path d="M16 52 Q33 36 50 52 T84 52" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M24 64 Q37 52 50 64 T76 64" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.4" fill="none"/>
+  <circle cx="64" cy="32" r="3" fill="currentColor"/>
+</svg>

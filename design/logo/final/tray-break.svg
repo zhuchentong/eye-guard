@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- 托盘「休息中」状态图标：息环 Rest Loop 白色版，蓝色圆角底（沿用原 tray-break 的 #377BEE） -->
+  <rect x="3" y="3" width="94" height="94" rx="24" fill="#377BEE"/>
+  <!-- 270° 走时弧（加粗适配 32px 托盘尺寸） -->
+  <path d="M50 20 A30 30 0 1 1 20 50" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <!-- 缺口处的微点 -->
+  <circle cx="28.8" cy="28.8" r="2.6" fill="#FFFFFF" opacity="0.55"/>
+  <!-- 圆心：安然闭合的眼 -->
+  <path d="M38 47.5 Q50 59.5 62 47.5" stroke="#FFFFFF" stroke-width="6.5" stroke-linecap="round" fill="none"/>
+</svg>

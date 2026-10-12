@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- 05b 虹环 Iris Dial — 息时迭代：实心瞳孔换成中空虹膜环 -->
+  <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+  <circle cx="50" cy="50" r="7" stroke="currentColor" stroke-width="3" fill="none"/>
+</svg>

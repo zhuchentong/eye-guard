@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- 05 息时 Rest Dial — 线条×几何：270° 走时弧 + 瞳孔圆心 -->
+  <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+  <!-- 缺口处的微点：循环仍会继续 -->
+  <circle cx="26" cy="26" r="2" fill="currentColor" opacity="0.35"/>
+  <!-- 圆心：表盘轴心，亦是瞳孔 -->
+  <circle cx="50" cy="50" r="7.5" fill="currentColor"/>
+</svg>

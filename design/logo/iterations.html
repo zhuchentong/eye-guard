@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eye-guard — Logo Iterations · 休止环 × 息时</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: #FAFAFA;
+            color: #161B18;
+            overflow-x: hidden;
+        }
+
+        .font-mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        .logo-card { transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
+        .logo-card:hover { transform: translateY(-4px); }
+
+        .logo-aura {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, rgba(16,185,129,0.18) 0%, transparent 70%);
+            border-radius: 50%;
+            transform: scale(0.5);
+            opacity: 0;
+            transition: all 1s cubic-bezier(0.16, 1, 0.3, 1);
+            filter: blur(40px);
+            pointer-events: none;
+        }
+
+        .logo-card:hover .logo-aura { transform: scale(1); opacity: 1; }
+
+        .divider-line {
+            width: 0;
+            height: 1px;
+            background: #161B18;
+            opacity: 0.2;
+            transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .logo-card:hover .divider-line { width: 100%; }
+
+        .tracking-ultra-wide { letter-spacing: 0.2em; }
+        .text-balance { text-wrap: balance; }
+    </style>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        const INK = { light: "#059669", dark: "#34D399" };
+        const CANVAS = { light: "#FFFFFF", dark: "#0C1712" };
+
+        /* ---- 原版（托盘对比用） ---- */
+        const REST_DOTS = [[82.6,44.8],[79.4,65],[65,79.4],[44.8,82.6],[26.7,73.3],[17.4,55.2],[20.6,35],[35,20.6],[55.2,17.4]];
+        const RestRingOrig = () => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <g fill="currentColor">{REST_DOTS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="3"/>)}</g>
+                <circle cx="73.3" cy="26.7" r="1.8" fill="currentColor" opacity="0.35"/>
+                <path d="M36 47 Q50 61 64 47" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+            </svg>
+        );
+        const RestDialOrig = () => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+                <circle cx="26" cy="26" r="2" fill="currentColor" opacity="0.35"/>
+                <circle cx="50" cy="50" r="7.5" fill="currentColor"/>
+            </svg>
+        );
+
+        /* ---- 迭代：休止环方向 ---- */
+
+        // 02a 匀环：8 点 45° 均布，缺口在正上方
+        const EvenRing = () => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <g fill="currentColor">
+                    <circle cx="73.3" cy="26.7" r="3"/><circle cx="83" cy="50" r="3"/><circle cx="73.3" cy="73.3" r="3"/>
+                    <circle cx="50" cy="83" r="3"/><circle cx="26.7" cy="73.3" r="3"/><circle cx="17" cy="50" r="3"/>
+                    <circle cx="26.7" cy="26.7" r="3"/>
+                </g>
+                <path d="M36 47 Q50 61 64 47" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+            </svg>
+        );
+
+        // 02b 渐细：圆点沿循环节奏渐细，时间流向缺口
+        const TAPER_DOTS = [[82.6,44.8,3.4],[79.4,65,3.15],[65,79.4,2.95],[44.8,82.6,2.75],[26.7,73.3,2.6],[17.4,55.2,2.45],[20.6,35,2.35],[35,20.6,2.25],[55.2,17.4,2.15]];
+        const TaperedRing = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <g fill="currentColor">
+                    {TAPER_DOTS.map(([x, y, r], i) => (
+                        <circle key={i} cx={x} cy={y} r={r}>
+                            {pulse && i === 8 ? <animate attributeName="opacity" values="1;0.45;1" dur="3.2s" repeatCount="indefinite"/> : null}
+                        </circle>
+                    ))}
+                </g>
+                <path d="M36 47 Q50 61 64 47" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+            </svg>
+        );
+
+        /* ---- 迭代：息时方向 ---- */
+
+        // 05a 行进：弧线末端缀一枚圆点
+        const InMotion = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+                <circle cx="16" cy="50" r="3" fill="currentColor">
+                    {pulse ? <animate attributeName="opacity" values="1;0.5;1" dur="3s" repeatCount="indefinite"/> : null}
+                </circle>
+                <circle cx="50" cy="50" r="7.5" fill="currentColor"/>
+            </svg>
+        );
+
+        // 05b 虹环：中空虹膜环
+        const IrisDial = () => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+                <circle cx="50" cy="50" r="7" stroke="currentColor" strokeWidth="3" fill="none"/>
+            </svg>
+        );
+
+        /* ---- 融合 ---- */
+
+        // 07 息环：270° 走时弧 + 闭眼弧
+        const RestLoop = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+                <circle cx="26" cy="26" r="2" fill="currentColor" opacity="0.35">
+                    {pulse ? <animate attributeName="opacity" values="0.15;0.5;0.15" dur="3.4s" repeatCount="indefinite"/> : null}
+                </circle>
+                <path d="M36 47 Q50 61 64 47" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+            </svg>
+        );
+
+        // 08 目光：瞳孔带圆孔高光（evenodd 负形）
+        const GazeMark = () => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+                <path d="M50 42.5 a7.5 7.5 0 1 0 0 15 a7.5 7.5 0 1 0 0 -15 Z M53.5 44.4 a2.6 2.6 0 1 0 0 5.2 a2.6 2.6 0 1 0 0 -5.2 Z" fill="currentColor" fillRule="evenodd"/>
+            </svg>
+        );
+
+        const LOGOS = [
+            {
+                id: "02a", file: "variants/02a-even-ring.svg",
+                title: "匀环", en: "Even Ring", pattern: "REFINE · REST RING",
+                philosophy: "圆点改为 45° 均匀排布，缺口移至正上方——像表盘指向 12 点的休止符。更对称，也更『钟』；代价是少了原版斜向缺口的前倾感。",
+                Component: EvenRing,
+            },
+            {
+                id: "02b", file: "variants/02b-tapered-ring.svg",
+                title: "渐细", en: "Tapered Ring", pattern: "REFINE · REST RING",
+                philosophy: "圆点沿循环节奏渐细，仿佛时间正流向缺口——休息不是中断，而是时间自然流到的下一刻。最细处圆点带呼吸微光。",
+                Component: TaperedRing,
+            },
+            {
+                id: "05a", file: "variants/05a-in-motion.svg",
+                title: "行进", en: "In Motion", pattern: "REFINE · REST DIAL",
+                philosophy: "在走时弧的末端缀上一枚圆点，像分针的头——进度有了『正在走』的方向感，圆心瞳孔依旧沉静。动与静各据一角。",
+                Component: InMotion,
+            },
+            {
+                id: "05b", file: "variants/05b-iris-dial.svg",
+                title: "虹环", en: "Iris Dial", pattern: "REFINE · REST DIAL",
+                philosophy: "实心瞳孔换成中空虹膜环：既是表盘的轴环，也是眼睛的虹膜。更深邃、更有『注视感』，代价是极小尺寸下中心细节变淡。",
+                Component: IrisDial,
+            },
+            {
+                id: "07", file: "variants/07-rest-loop.svg",
+                title: "息环", en: "Rest Loop", pattern: "FUSION · RING × DIAL",
+                philosophy: "两个方向的直接融合：息时的 270° 走时弧替代休止环的点阵圆环，闭眼弧留在圆心。元素最少、线条最整，托盘表现预期最佳。",
+                Component: RestLoop,
+            },
+            {
+                id: "08", file: "variants/08-gaze-mark.svg",
+                title: "目光", en: "Gaze Mark", pattern: "REFINE · REST DIAL",
+                philosophy: "瞳孔右上留出一粒圆孔高光（圆角负形原则）——『眼里的光』。灵动、最像眼睛，但 22px 下高光会糊成实心，宜作大尺寸主视觉。",
+                Component: GazeMark,
+            },
+        ];
+
+        const ORIGINALS = [
+            { title: "休止环 · 原版", Component: RestRingOrig },
+            { title: "息时 · 原版", Component: RestDialOrig },
+        ];
+
+        const IterationShowcase = () => {
+            const [dark, setDark] = useState(false);
+            const ink = dark ? INK.dark : INK.light;
+            const canvasBg = dark ? CANVAS.dark : CANVAS.light;
+
+            return (
+                <div className="min-h-screen flex flex-col items-center py-20 px-6">
+
+                    {/* Header */}
+                    <div className="text-center mb-16 max-w-3xl">
+                        <h1 className="text-6xl md:text-7xl font-extralight tracking-wider mb-6">
+                            eye-guard
+                        </h1>
+                        <p className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide mb-8">
+                            Logo Iterations · 休止环 × 息时
+                        </p>
+                        <div className="w-12 h-[1px] bg-[#161B18] mx-auto opacity-30 mb-10"></div>
+                        <div className="flex items-center justify-center gap-4">
+                            <button
+                                onClick={() => setDark(!dark)}
+                                className="font-mono text-[11px] uppercase tracking-widest rounded-full px-5 py-2 opacity-60 hover:opacity-100 transition-all duration-500 border"
+                                style={{ borderColor: ink, color: ink }}
+                            >
+                                {dark ? "● 深色底预览 / Dark" : "○ 浅色底预览 / Light"}
+                            </button>
+                            <a
+                                href="showcase.html"
+                                className="font-mono text-[11px] uppercase tracking-widest opacity-40 hover:opacity-80 transition-opacity duration-300 underline underline-offset-4"
+                            >
+                                ← 全部 6 方向
+                            </a>
+                        </div>
+                    </div>
+
+                    {/* Logo Grid */}
+                    <div className="max-w-7xl w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 mb-28">
+                        {LOGOS.map((logo) => (
+                            <div key={logo.id} className="flex flex-col items-center logo-card">
+
+                                <div
+                                    className="w-64 h-64 mb-10 flex items-center justify-center relative rounded-2xl border border-black/5 transition-colors duration-700"
+                                    style={{ background: canvasBg }}
+                                >
+                                    <div className="logo-aura"></div>
+                                    <div className="w-32 h-32 relative z-10" style={{ color: ink }}>
+                                        <logo.Component />
+                                    </div>
+                                </div>
+
+                                <div className="text-center w-full px-4">
+                                    <h2 className="text-xl font-medium tracking-wider mb-2">
+                                        {logo.title}
+                                        <span className="opacity-40 text-sm font-light ml-2">{logo.en}</span>
+                                    </h2>
+                                    <h3 className="text-xs font-mono opacity-50 tracking-widest mb-6">
+                                        {logo.pattern}
+                                    </h3>
+                                    <p className="text-sm leading-relaxed opacity-70 text-left font-light text-balance">
+                                        {logo.philosophy}
+                                    </p>
+                                    <div className="flex items-center justify-center gap-8 mt-6">
+                                        <div className="flex items-end gap-3" style={{ color: ink }}>
+                                            <div style={{ width: 28, height: 28 }} title="28px"><logo.Component pulse={false}/></div>
+                                            <div style={{ width: 18, height: 18 }} title="18px"><logo.Component pulse={false}/></div>
+                                            <span className="font-mono text-[10px] opacity-40">28 / 18px</span>
+                                        </div>
+                                        <a
+                                            href={logo.file}
+                                            download
+                                            className="font-mono text-[11px] tracking-widest opacity-50 hover:opacity-100 transition-opacity duration-300 underline underline-offset-4"
+                                        >
+                                            SVG ↓
+                                        </a>
+                                    </div>
+                                </div>
+
+                                <div className="divider-line mt-8 mx-auto"></div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Tray-size Test */}
+                    <div className="w-full max-w-7xl mb-8">
+                        <h3 className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide mb-8 text-center">
+                            托盘尺寸测试 · Tray-size Test (22px) — 迭代款
+                        </h3>
+                        <div className="flex flex-wrap items-stretch justify-center gap-5 mb-10">
+                            {LOGOS.map((logo) => (
+                                <div key={logo.id} className="flex flex-col items-center gap-2">
+                                    <div className="flex rounded-xl border border-black/5 overflow-hidden">
+                                        <div className="w-20 h-14 flex items-center justify-center" style={{ background: "#FFFFFF", color: INK.light }}>
+                                            <div style={{ width: 22, height: 22 }}><logo.Component pulse={false}/></div>
+                                        </div>
+                                        <div className="w-20 h-14 flex items-center justify-center" style={{ background: CANVAS.dark, color: INK.dark }}>
+                                            <div style={{ width: 22, height: 22 }}><logo.Component pulse={false}/></div>
+                                        </div>
+                                    </div>
+                                    <span className="font-mono text-[10px] opacity-50">{logo.title} · {logo.en}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <h3 className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide mb-8 text-center">
+                            原版对照 · Originals (22px)
+                        </h3>
+                        <div className="flex flex-wrap items-stretch justify-center gap-5">
+                            {ORIGINALS.map((logo, i) => (
+                                <div key={i} className="flex flex-col items-center gap-2">
+                                    <div className="flex rounded-xl border border-black/5 overflow-hidden">
+                                        <div className="w-20 h-14 flex items-center justify-center" style={{ background: "#FFFFFF", color: INK.light }}>
+                                            <div style={{ width: 22, height: 22 }}><logo.Component/></div>
+                                        </div>
+                                        <div className="w-20 h-14 flex items-center justify-center" style={{ background: CANVAS.dark, color: INK.dark }}>
+                                            <div style={{ width: 22, height: 22 }}><logo.Component/></div>
+                                        </div>
+                                    </div>
+                                    <span className="font-mono text-[10px] opacity-50">{logo.title}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="mt-24 max-w-2xl text-center">
+                        <p className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide leading-loose">
+                            eye-guard · Logo Iterations<br/>
+                            Generated with Logo Generator · 2026
+                        </p>
+                    </div>
+
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById("root")).render(<IterationShowcase />);
+    </script>
+
+</body>
+</html>

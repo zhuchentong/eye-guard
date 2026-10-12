@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eye-guard — Logo Design Exploration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: #FAFAFA;
+            color: #161B18;
+            overflow-x: hidden;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+        }
+
+        /* Subtle grain texture */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        .logo-card {
+            transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .logo-card:hover {
+            transform: translateY(-4px);
+        }
+
+        .logo-canvas {
+            position: relative;
+            transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .logo-aura {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, rgba(16,185,129,0.18) 0%, transparent 70%);
+            border-radius: 50%;
+            transform: scale(0.5);
+            opacity: 0;
+            transition: all 1s cubic-bezier(0.16, 1, 0.3, 1);
+            filter: blur(40px);
+            pointer-events: none;
+        }
+
+        .logo-card:hover .logo-aura {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        .divider-line {
+            width: 0;
+            height: 1px;
+            background: #161B18;
+            opacity: 0.2;
+            transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .logo-card:hover .divider-line {
+            width: 100%;
+        }
+
+        .tracking-ultra-wide {
+            letter-spacing: 0.2em;
+        }
+
+        .text-balance {
+            text-wrap: balance;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        /* 品牌色：护眼绿（浅底用深一档，深底用亮一档） */
+        const INK = { light: "#059669", dark: "#34D399" };
+        const CANVAS = { light: "#FFFFFF", dark: "#0C1712" };
+
+        /* 01 静瞳 Still Pupil — 纯几何 */
+        const StillPupil = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M14 50 Q50 16 86 50 Q50 84 14 50 Z" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round"/>
+                <circle cx="50" cy="50" r="9" fill="currentColor">
+                    {pulse ? <animate attributeName="opacity" values="1;0.5;1" dur="3.6s" repeatCount="indefinite"/> : null}
+                </circle>
+            </svg>
+        );
+
+        /* 02 休止环 Rest Ring — 点阵×循环 */
+        const REST_DOTS = [[82.6,44.8],[79.4,65],[65,79.4],[44.8,82.6],[26.7,73.3],[17.4,55.2],[20.6,35],[35,20.6],[55.2,17.4]];
+        const RestRing = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <g fill="currentColor">
+                    {REST_DOTS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="3"/>)}
+                </g>
+                <circle cx="73.3" cy="26.7" r="1.8" fill="currentColor" opacity="0.35">
+                    {pulse ? <animate attributeName="opacity" values="0.15;0.5;0.15" dur="3.2s" repeatCount="indefinite"/> : null}
+                </circle>
+                <path d="M36 47 Q50 61 64 47" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+            </svg>
+        );
+
+        /* 03 柔波 Soft Wave — 线条系统 */
+        const SoftWave = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M16 52 Q33 36 50 52 T84 52" stroke="currentColor" strokeWidth="3" strokeLinecap="round" fill="none"/>
+                <path d="M24 64 Q37 52 50 64 T76 64" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.4" fill="none"/>
+                <circle cx="64" cy="32" r="3" fill="currentColor">
+                    {pulse ? <animate attributeName="opacity" values="0.3;1;0.3" dur="3.8s" repeatCount="indefinite"/> : null}
+                </circle>
+            </svg>
+        );
+
+        /* 04 凝露 Dew Lattice — 点阵×几何 */
+        const DEW_DOTS = [
+            [33,38],[41.5,38],[50,38],[58.5,38],[67,38],
+            [25,44],[33,44],[42,44],[58,44],[66,44],[74,44],
+            [21,50],[29,50],[37,50],[61,50],[69,50],[77,50],
+            [25,56],[33,56],[42,56],[58,56],[66,56],[74,56],
+            [33,62],[41.5,62],[50,62],[58.5,62],[67,62],
+        ];
+        const DEW_R = (y) => (y === 38 || y === 62) ? 2.2 : (y === 50 ? 2.8 : 2.5);
+        const DewLattice = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M12 50 Q50 18 88 50 Q50 82 12 50 Z" stroke="currentColor" strokeWidth="1" opacity="0.3" fill="none"/>
+                <g fill="currentColor">
+                    {DEW_DOTS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={DEW_R(y)}/>)}
+                </g>
+                <circle cx="50" cy="50" r="1.8" fill="currentColor">
+                    {pulse ? <animate attributeName="opacity" values="0.4;1;0.4" dur="2.8s" repeatCount="indefinite"/> : null}
+                </circle>
+            </svg>
+        );
+
+        /* 05 息时 Rest Dial — 弧线×瞳孔 */
+        const RestDial = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+                <circle cx="26" cy="26" r="2" fill="currentColor" opacity="0.35">
+                    {pulse ? <animate attributeName="opacity" values="0.15;0.5;0.15" dur="3.4s" repeatCount="indefinite"/> : null}
+                </circle>
+                <circle cx="50" cy="50" r="7.5" fill="currentColor"/>
+            </svg>
+        );
+
+        /* 06 远山 Distant Hills — 层次构图 */
+        const HILL_DOTS = [];
+        for (const y of [18, 26, 34]) for (const x of [24, 38, 52, 66, 80]) HILL_DOTS.push([x, y]);
+        const DistantHills = ({ pulse = true }) => (
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full block">
+                <g fill="currentColor" opacity="0.15">
+                    {HILL_DOTS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="1.5"/>)}
+                </g>
+                <path d="M34 70 Q50 56 66 70" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.5" fill="none"/>
+                <path d="M18 62 Q50 34 82 62" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+                <circle cx="69" cy="29" r="4" fill="currentColor">
+                    {pulse ? <animate attributeName="opacity" values="1;0.6;1" dur="4s" repeatCount="indefinite"/> : null}
+                </circle>
+            </svg>
+        );
+
+        const LOGOS = [
+            {
+                id: "01", file: "variants/01-still-pupil.svg",
+                title: "静瞳", en: "Still Pupil", pattern: "PURE GEOMETRY",
+                philosophy: "一只安静注视的眼睛：两段圆弧合围成眼廓，实心圆即瞳孔，减无可减。瞳孔的呼吸式微光，是『正在守护』的心跳。",
+                Component: StillPupil,
+            },
+            {
+                id: "02", file: "variants/02-rest-ring.svg",
+                title: "休止环", en: "Rest Ring", pattern: "DOTS × CYCLE",
+                philosophy: "九枚圆点围出番茄钟的循环，右上缺口即休息的入口；中心一道下弯弧线，是一只安然闭合的眼。到点，就闭眼。",
+                Component: RestRing,
+            },
+            {
+                id: "03", file: "variants/03-soft-wave.svg",
+                title: "柔波", en: "Soft Wave", pattern: "LINE SYSTEM",
+                philosophy: "两道舒缓的波形，如闭目时平缓起伏的呼吸；右上方的呼吸圆点，是浮上来的一丝微光。休息，从看见节奏开始。",
+                Component: SoftWave,
+            },
+            {
+                id: "04", file: "variants/04-dew-lattice.svg",
+                title: "凝露", en: "Dew Lattice", pattern: "DOTS × GEOMETRY",
+                philosophy: "圆点以密度渐变凝成眼睛的形状，瞳孔以『留白』呈现——负形即瞳仁；中心一点露光是唯一的焦点，凝视即安宁。",
+                Component: DewLattice,
+            },
+            {
+                id: "05", file: "variants/05-rest-dial.svg",
+                title: "息时", en: "Rest Dial", pattern: "ARC × PUPIL",
+                philosophy: "270° 弧线既是番茄钟的走时进度，也是睁视的边界；圆心既是表盘轴心，也是瞳孔。缺口处一枚微点，是循环仍会继续的承诺。",
+                Component: RestDial,
+            },
+            {
+                id: "06", file: "variants/06-distant-hills.svg",
+                title: "远山", en: "Distant Hills", pattern: "LAYERED COMPOSITION",
+                philosophy: "20-20-20 法则的意象化：抬头远眺山脊与光点。上弧既是远山，也是抬起的眼睑；低透明度点阵，是远处空气的颗粒感。",
+                Component: DistantHills,
+            },
+        ];
+
+        const LogoShowcase = () => {
+            const [dark, setDark] = useState(false);
+            const ink = dark ? INK.dark : INK.light;
+            const canvasBg = dark ? CANVAS.dark : CANVAS.light;
+
+            return (
+                <div className="min-h-screen flex flex-col items-center py-20 px-6">
+
+                    {/* Header */}
+                    <div className="text-center mb-16 max-w-3xl">
+                        <h1 className="text-6xl md:text-7xl font-extralight tracking-wider mb-6">
+                            eye-guard
+                        </h1>
+                        <p className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide mb-8">
+                            护眼休息计时 · Eye-care Pomodoro Timer
+                        </p>
+                        <div className="w-12 h-[1px] bg-[#161B18] mx-auto opacity-30 mb-10"></div>
+                        <button
+                            onClick={() => setDark(!dark)}
+                            className="font-mono text-[11px] uppercase tracking-widest rounded-full px-5 py-2 opacity-60 hover:opacity-100 transition-all duration-500 border"
+                            style={{ borderColor: ink, color: ink }}
+                        >
+                            {dark ? "● 深色底预览 / Dark" : "○ 浅色底预览 / Light"}
+                        </button>
+                    </div>
+
+                    {/* Logo Grid */}
+                    <div className="max-w-7xl w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 mb-28">
+                        {LOGOS.map((logo) => (
+                            <div key={logo.id} className="flex flex-col items-center logo-card">
+
+                                {/* Logo Canvas */}
+                                <div
+                                    className="w-64 h-64 mb-10 flex items-center justify-center relative rounded-2xl border border-black/5 transition-colors duration-700"
+                                    style={{ background: canvasBg }}
+                                >
+                                    <div className="logo-aura"></div>
+                                    <div className="w-32 h-32 relative z-10 logo-canvas" style={{ color: ink }}>
+                                        <logo.Component />
+                                    </div>
+                                </div>
+
+                                {/* Text Description */}
+                                <div className="text-center w-full px-4">
+                                    <h2 className="text-xl font-medium tracking-wider mb-2">
+                                        {logo.title}
+                                        <span className="opacity-40 text-sm font-light ml-2">{logo.en}</span>
+                                    </h2>
+                                    <h3 className="text-xs font-mono opacity-50 tracking-widest mb-6">
+                                        {logo.pattern}
+                                    </h3>
+                                    <p className="text-sm leading-relaxed opacity-70 text-left font-light text-balance">
+                                        {logo.philosophy}
+                                    </p>
+                                    <div className="flex items-center justify-center gap-8 mt-6">
+                                        <div className="flex items-end gap-3" style={{ color: ink }}>
+                                            <div style={{ width: 28, height: 28 }} title="28px"><logo.Component pulse={false}/></div>
+                                            <div style={{ width: 18, height: 18 }} title="18px"><logo.Component pulse={false}/></div>
+                                            <span className="font-mono text-[10px] opacity-40">28 / 18px</span>
+                                        </div>
+                                        <a
+                                            href={logo.file}
+                                            download
+                                            className="font-mono text-[11px] tracking-widest opacity-50 hover:opacity-100 transition-opacity duration-300 underline underline-offset-4"
+                                        >
+                                            SVG ↓
+                                        </a>
+                                    </div>
+                                </div>
+
+                                {/* Bottom Divider */}
+                                <div className="divider-line mt-8 mx-auto"></div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Tray-size Test */}
+                    <div className="w-full max-w-7xl mb-8">
+                        <h3 className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide mb-8 text-center">
+                            托盘尺寸测试 · Tray-size Test (22px)
+                        </h3>
+                        <div className="flex flex-wrap items-stretch justify-center gap-5">
+                            {LOGOS.map((logo) => (
+                                <div key={logo.id} className="flex flex-col items-center gap-2">
+                                    <div className="flex rounded-xl border border-black/5 overflow-hidden">
+                                        <div className="w-20 h-14 flex items-center justify-center" style={{ background: "#FFFFFF", color: INK.light }}>
+                                            <div style={{ width: 22, height: 22 }}><logo.Component pulse={false}/></div>
+                                        </div>
+                                        <div className="w-20 h-14 flex items-center justify-center" style={{ background: CANVAS.dark, color: INK.dark }}>
+                                            <div style={{ width: 22, height: 22 }}><logo.Component pulse={false}/></div>
+                                        </div>
+                                    </div>
+                                    <span className="font-mono text-[10px] opacity-50">{logo.title} · {logo.en}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="mt-24 max-w-2xl text-center">
+                        <p className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide leading-loose">
+                            eye-guard · Logo Design Exploration<br/>
+                            Generated with Logo Generator · 2026
+                        </p>
+                    </div>
+
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById("root")).render(<LogoShowcase />);
+    </script>
+
+</body>
+</html>

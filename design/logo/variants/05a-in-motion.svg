@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- 05a 行进 In Motion — 息时迭代：走时弧末端缀一枚圆点，进度有了方向 -->
+  <path d="M50 16 A34 34 0 1 1 16 50" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+  <circle cx="16" cy="50" r="3" fill="currentColor"/>
+  <circle cx="50" cy="50" r="7.5" fill="currentColor"/>
+</svg>
